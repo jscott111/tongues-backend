@@ -8,21 +8,29 @@
     "dev": "nodemon server.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "keywords": ["translation", "audio", "real-time", "ai", "websockets"],
+  "keywords": [
+    "translation",
+    "audio",
+    "real-time",
+    "ai",
+    "websockets"
+  ],
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "express": "^4.18.2",
-    "socket.io": "^4.7.2",
+    "@azure-rest/ai-translation-text": "^1.0.1",
+    "axios": "^1.5.0",
     "cors": "^2.8.5",
     "dotenv": "^16.3.1",
-    "axios": "^1.5.0",
-    "multer": "^1.4.5-lts.1"
+    "express": "^4.18.2",
+    "multer": "^1.4.5-lts.1",
+    "openai": "^5.16.0",
+    "socket.io": "^4.7.2"
   },
   "devDependencies": {
-    "nodemon": "^3.0.1",
     "@types/node": "^20.5.0",
-    "typescript": "^5.1.6",
-    "ts-node": "^10.9.1"
+    "nodemon": "^3.0.1",
+    "ts-node": "^10.9.1",
+    "typescript": "^5.1.6"
   }
 }

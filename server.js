@@ -30,7 +30,40 @@ io.on('connection', (socket) => {
   activeConnections.set(socket.id, {
     isStreaming: false,
     sourceLanguage: 'en',
-    targetLanguage: 'es'
+    targetLanguage: 'fr'
+  });
+
+  // Handle speech transcription
+  socket.on('speechTranscription', async (data) => {
+    try {
+      console.log(`🎤 Received: "${data.transcription}"`);
+      
+      const { transcription, sourceLanguage, targetLanguage } = data;
+      
+      // Update connection info
+      const connection = activeConnections.get(socket.id);
+      if (connection) {
+        connection.isStreaming = true;
+        connection.sourceLanguage = sourceLanguage;
+        connection.targetLanguage = targetLanguage;
+      }
+
+      // Process the real transcription with Azure Translator API
+      const translatedText = await processTranscription(transcription, sourceLanguage, targetLanguage);
+      
+      if (translatedText) {
+        socket.emit('translation', {
+          translatedText,
+          sourceLanguage,
+          targetLanguage,
+          timestamp: new Date().toISOString()
+        });
+      }
+      
+    } catch (error) {
+      console.error('Error processing speech transcription:', error);
+      socket.emit('error', { message: 'Failed to process transcription: ' + error.message });
+    }
   });
 
   // Handle audio stream
@@ -80,39 +113,70 @@ io.on('connection', (socket) => {
   });
 });
 
-// Audio processing function (placeholder for AI integration)
-async function processAudioStream(audioData, sourceLanguage, targetLanguage) {
-  // This is where you'd integrate with:
-  // 1. Speech-to-Text API (Google Speech-to-Text, OpenAI Whisper, etc.)
-  // 2. Translation API (Google Translate, DeepL, OpenAI, etc.)
-  
-  // For now, return a mock translation
-  // In production, you'd:
-  // 1. Convert audio data to proper format
-  // 2. Send to speech-to-text service
-  // 3. Send text to translation service
-  // 4. Return translated text
-  
-  console.log(`Processing audio: ${sourceLanguage} -> ${targetLanguage}`);
-  console.log(`Audio data length: ${audioData.length}`);
-  
-  // Mock translation for demonstration
-  const mockTranslations = {
-    'en-es': 'Hola, ¿cómo estás?',
-    'es-en': 'Hello, how are you?',
-    'en-fr': 'Bonjour, comment allez-vous?',
-    'fr-en': 'Hello, how are you?',
-    'en-de': 'Hallo, wie geht es dir?',
-    'de-en': 'Hello, how are you?'
-  };
-  
-  const key = `${sourceLanguage}-${targetLanguage}`;
-  const reverseKey = `${targetLanguage}-${sourceLanguage}`;
-  
-  // Simulate processing delay
-  await new Promise(resolve => setTimeout(resolve, 1000 + Math.random() * 2000));
-  
-  return mockTranslations[key] || mockTranslations[reverseKey] || 'Translation not available';
+
+
+// Process real transcribed text with Azure Translator API
+async function processTranscription(transcription, sourceLanguage, targetLanguage) {
+  try {
+    console.log(`🌍 Processing: "${transcription}" (${sourceLanguage} → ${targetLanguage})`);
+    
+    // Use Azure Translator API for real translations
+    const createClient = require('@azure-rest/ai-translation-text').default;
+    
+    // Initialize Azure Translator with your endpoint, key, and region
+    const client = createClient(process.env.AZURE_TRANSLATOR_ENDPOINT, {
+      key: process.env.AZURE_TRANSLATOR_KEY,
+      region: process.env.AZURE_TRANSLATOR_REGION
+    });
+    
+    // Convert language codes to Azure format (they use standard ISO codes)
+    const azureSourceLang = sourceLanguage === 'en' ? 'en' : 
+                           sourceLanguage === 'es' ? 'es' : 
+                           sourceLanguage === 'fr' ? 'fr' : 
+                           sourceLanguage === 'de' ? 'de' : 
+                           sourceLanguage === 'it' ? 'it' : 
+                           sourceLanguage === 'pt' ? 'pt' : 'en';
+    
+    const azureTargetLang = targetLanguage === 'es' ? 'es' : 
+                           targetLanguage === 'fr' ? 'fr' : 
+                           targetLanguage === 'de' ? 'de' : 
+                           targetLanguage === 'it' ? 'it' : 
+                           targetLanguage === 'pt' ? 'pt' : 'en';
+    
+    // Call Azure Translator API
+    const result = await client.path('/translate').post({
+      body: [{
+        text: transcription
+      }],
+      queryParameters: {
+        'api-version': '3.0',
+        'from': azureSourceLang,
+        'to': azureTargetLang
+      }
+    });
+    
+    if (result.body && result.body[0] && result.body[0].translations && result.body[0].translations[0]) {
+      const translatedText = result.body[0].translations[0].text;
+      console.log(`✅ Translated: "${transcription}" → "${translatedText}"`);
+      return translatedText;
+    } else {
+      throw new Error('Invalid response from Azure Translator');
+    }
+    
+  } catch (error) {
+    console.error('❌ Translation error:', error.message);
+    
+    // Fallback: return error message in target language
+    const errorMessage = {
+      'es': `Error de traducción: ${error.message}`,
+      'fr': `Erreur de traduction: ${error.message}`,
+      'de': `Übersetzungsfehler: ${error.message}`,
+      'it': `Errore di traduzione: ${error.message}`,
+      'pt': `Erro de tradução: ${error.message}`
+    }[targetLanguage] || `Translation error: ${error.message}`;
+    
+    return errorMessage;
+  }
 }
 
 // API Routes
