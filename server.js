@@ -5,6 +5,9 @@ const cors = require('cors')
 const path = require('path')
 require('dotenv').config()
 
+// Import language enums and helpers
+const { getSupportedLanguages } = require('./azureLangs')
+
 const app = express()
 const server = http.createServer(app)
 const io = socketIo(server, {
@@ -152,23 +155,9 @@ app.get('/api/health', (req, res) => {
 })
 
 app.get('/api/languages', (req, res) => {
-  const languages = [
-    { code: 'en', name: 'English', flag: '🇺🇸' },
-    { code: 'es', name: 'Spanish', flag: '🇪🇸' },
-    { code: 'fr', name: 'French', flag: '🇫🇷' },
-    { code: 'de', name: 'German', flag: '🇩🇪' },
-    { code: 'it', name: 'Italian', flag: '🇮🇹' },
-    { code: 'pt', name: 'Portuguese', flag: '🇵🇹' },
-    { code: 'ru', name: 'Russian', flag: '🇷🇺' },
-    { code: 'ja', name: 'Japanese', flag: '🇯🇵' },
-    { code: 'ko', name: 'Korean', flag: '🇰🇷' },
-    { code: 'zh', name: 'Chinese', flag: '🇨🇳' },
-    { code: 'ar', name: 'Arabic', flag: '🇸🇦' },
-    { code: 'hi', name: 'Hindi', flag: '🇮🇳' }
-  ]
-  
+  const languages = getSupportedLanguages()
   res.json(languages)
-});
+})
 
 // Error handling middleware
 app.use((err, req, res, next) => {
