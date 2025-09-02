@@ -121,7 +121,7 @@ io.on('connection', (socket) => {
 
   socket.on('disconnect', () => {
     activeConnections.delete(socket.id)
-    const currentActiveCount = activeConnections.size - 1
+    const currentActiveCount = activeConnections.size
     console.log(`📡 Remaining active connections: ${currentActiveCount}`)
     
     io.emit('connectionCount', currentActiveCount)
