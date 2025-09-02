@@ -6,6 +6,8 @@ const path = require('path')
 require('dotenv').config()
 
 const { getSupportedLanguages } = require('./azureLangs')
+const { authenticateToken, authenticateSocket } = require('./middleware/auth')
+const authRoutes = require('./routes/auth')
 
 const app = express()
 const server = http.createServer(app)
@@ -27,31 +29,84 @@ const io = socketIo(server, {
   allowEIO3: true
 })
 
+// Socket authentication middleware
+io.use(authenticateSocket)
+
 app.use(express.json({ limit: '50mb' }))
 app.use(express.static(path.join(__dirname, 'public')))
 
+// Authentication routes
+app.use('/api/auth', authRoutes)
+
 const activeConnections = new Map()
 
-const emitConnectionCount = () => {
+const emitConnectionCount = (sessionId = null) => {
   const connectionsByLanguage = {}
+  let totalConnections = 0
+  
   activeConnections.forEach((connection) => {
+    // If sessionId is provided, only count connections in that session
+    if (sessionId && connection.sessionId !== sessionId) {
+      return
+    }
+    
+    // Only count connections that have a valid session ID
+    if (!connection.sessionId) {
+      return
+    }
+    
+    totalConnections++
     if (connection.targetLanguage) {
       connectionsByLanguage[connection.targetLanguage] = (connectionsByLanguage[connection.targetLanguage] || 0) + 1
     }
   })
   
-  io.emit('connectionCount', {
-    total: activeConnections.size,
+  const connectionData = {
+    total: totalConnections,
     byLanguage: connectionsByLanguage
-  })
+  }
+  
+  if (sessionId) {
+    // Emit to all connections in the same session
+    const sessionConnections = Array.from(activeConnections.entries())
+      .filter(([_, conn]) => conn.sessionId === sessionId)
+      .map(([socketId, _]) => socketId)
+    
+    console.log(`📊 Emitting connection count for session ${sessionId}:`, connectionData)
+    
+    sessionConnections.forEach(socketId => {
+      const targetSocket = io.sockets.sockets.get(socketId)
+      if (targetSocket) {
+        targetSocket.emit('connectionCount', connectionData)
+      }
+    })
+  } else {
+    // Emit to all connections with valid sessions
+    const validConnections = Array.from(activeConnections.entries())
+      .filter(([_, conn]) => conn.sessionId)
+      .map(([socketId, _]) => socketId)
+    
+    validConnections.forEach(socketId => {
+      const targetSocket = io.sockets.sockets.get(socketId)
+      if (targetSocket) {
+        targetSocket.emit('connectionCount', connectionData)
+      }
+    })
+  }
 }
 
 io.on('connection', (socket) => {
   console.log(`🔌 Client connected: ${socket.id}`)
+  console.log(`👤 User: ${socket.user?.email || 'Anonymous'}`)
+  console.log(`🔗 Session: ${socket.sessionId || 'None'}`)
   console.log(`📡 Total connections: ${io.engine.clientsCount}`)
   console.log(`🌐 Client origin: ${socket.handshake.headers.origin}`)
+  console.log(`🔗 Auth data:`, socket.handshake.auth)
   
   activeConnections.set(socket.id, {
+    userId: socket.user?.id,
+    userEmail: socket.user?.email,
+    sessionId: socket.sessionId,
     isStreaming: false,
     sourceLanguage: null,
     targetLanguage: null
@@ -59,8 +114,13 @@ io.on('connection', (socket) => {
 
   const currentActiveCount = activeConnections.size
   console.log(`👥 Active connections: ${currentActiveCount}`)
+  console.log(`🔗 All active connections:`, Array.from(activeConnections.values()).map(c => ({ 
+    sessionId: c.sessionId, 
+    userEmail: c.userEmail,
+    targetLanguage: c.targetLanguage 
+  })))
   
-  emitConnectionCount()
+  emitConnectionCount(socket.sessionId)
 
   socket.on('speechTranscription', async (data) => {
     try {
@@ -74,15 +134,43 @@ io.on('connection', (socket) => {
         connection.sourceLanguage = sourceLanguage
       }
 
-      emitConnectionCount()
-
-      io.emit('transcription', {
-        type: 'transcription',
-        originalText: transcription,
-        sourceLanguage,
-        bubbleId,
-        timestamp: new Date().toISOString()
-      })
+      // Emit transcription to all connections with the same session ID
+      const currentConnection = activeConnections.get(socket.id)
+      console.log(`🎤 Current connection:`, currentConnection)
+      emitConnectionCount(currentConnection?.sessionId)
+      if (currentConnection?.sessionId) {
+        // Find all connections with the same session ID
+        const sessionConnections = Array.from(activeConnections.entries())
+          .filter(([_, conn]) => conn.sessionId === currentConnection.sessionId)
+          .map(([socketId, _]) => socketId)
+        
+        console.log(`🎤 Session connections for ${currentConnection.sessionId}:`, sessionConnections)
+        
+        // Emit to all sockets in the same session
+        sessionConnections.forEach(socketId => {
+          const targetSocket = io.sockets.sockets.get(socketId)
+          if (targetSocket) {
+            console.log(`🎤 Emitting transcription to socket ${socketId}`)
+            targetSocket.emit('transcription', {
+              type: 'transcription',
+              originalText: transcription,
+              sourceLanguage,
+              bubbleId,
+              timestamp: new Date().toISOString()
+            })
+          }
+        })
+      } else {
+        console.log(`🎤 No session ID, emitting to all connections`)
+        // Fallback: emit to all connections (for backward compatibility)
+        io.emit('transcription', {
+          type: 'transcription',
+          originalText: transcription,
+          sourceLanguage,
+          bubbleId,
+          timestamp: new Date().toISOString()
+        })
+      }
       
       socket.emit('transcriptionComplete', {
         type: 'transcriptionComplete',
@@ -136,40 +224,66 @@ io.on('connection', (socket) => {
     if (connection) {
       connection.targetLanguage = data.targetLanguage
       console.log(`🎯 Client ${socket.id} set target language to ${data.targetLanguage}`)
-      emitConnectionCount()
+      emitConnectionCount(connection.sessionId)
     }
   })
 
   socket.on('getConnectionCount', () => {
+    const currentConnection = activeConnections.get(socket.id)
+    const sessionId = currentConnection?.sessionId
+    
+    console.log(`📊 getConnectionCount requested by socket ${socket.id}, session: ${sessionId}`)
+    
     const connectionsByLanguage = {}
+    let totalConnections = 0
+    
     activeConnections.forEach((connection) => {
+      // Only count connections in the same session
+      if (sessionId && connection.sessionId !== sessionId) {
+        return
+      }
+      
+      // Only count connections that have a valid session ID
+      if (!connection.sessionId) {
+        return
+      }
+      
+      totalConnections++
       if (connection.targetLanguage) {
-        connectionsByLanguage[connection.targetLanguage] = (connectionsByLanguage[connection.targetLanguage] || 0)
+        connectionsByLanguage[connection.targetLanguage] = (connectionsByLanguage[connection.targetLanguage] || 0) + 1
       }
     })
     
-    socket.emit('connectionCount', {
-      total: activeConnections.size,
+    const connectionData = {
+      total: totalConnections,
       byLanguage: connectionsByLanguage
-    })
+    }
+    
+    console.log(`📊 Emitting connection count for session ${sessionId}:`, connectionData)
+    socket.emit('connectionCount', connectionData)
   })
 
   socket.on('disconnect', () => {
+    const connection = activeConnections.get(socket.id)
     activeConnections.delete(socket.id)
     const currentActiveCount = activeConnections.size
     console.log(`📡 Remaining active connections: ${currentActiveCount}`)
     
-    emitConnectionCount()
+    emitConnectionCount(connection?.sessionId)
   })
 })
 
-app.get('/api/websocket-status', (req, res) => {
+app.get('/api/websocket-status', authenticateToken, (req, res) => {
   res.json({
     status: 'OK',
     timestamp: new Date().toISOString(),
     activeConnections: activeConnections.size,
     totalClients: io.engine.clientsCount,
-    websocketEnabled: true
+    websocketEnabled: true,
+    user: {
+      id: req.user.id,
+      email: req.user.email
+    }
   })
 })
 
@@ -222,12 +336,12 @@ app.get('/api/health', (req, res) => {
   })
 })
 
-app.get('/api/languages', (req, res) => {
+app.get('/api/languages', authenticateToken, (req, res) => {
   const languages = getSupportedLanguages()
   res.json(languages)
 })
 
-app.post('/api/translate', async (req, res) => {
+app.post('/api/translate', authenticateToken, async (req, res) => {
   try {
     const { text, from, to } = req.body
     
@@ -235,13 +349,15 @@ app.post('/api/translate', async (req, res) => {
       return res.status(400).json({ error: 'Missing required fields: text, from, to' })
     }
 
+    console.log(`🌍 User ${req.user.email} translating: "${text}" (${from} → ${to})`)
     const translatedText = await processTranscription(text, from, to)
     
     res.json({
       translatedText,
       originalText: text,
       sourceLanguage: from,
-      targetLanguage: to
+      targetLanguage: to,
+      userId: req.user.id
     })
     
   } catch (error) {
