@@ -1,7 +1,7 @@
 {
-  "name": "tongues-backend",
+  "name": "scribe-backend",
   "version": "1.0.0",
-  "description": "Backend server for Tongues - Real-time audio translation app",
+  "description": "Backend server for Scribe - Real-time audio translation app",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",

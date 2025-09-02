@@ -1,4 +1,4 @@
-# 🚀 Tongues Backend
+# 🚀 Scribe Backend
 
 Node.js + Express backend server for the Tongues real-time audio translation application.
 

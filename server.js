@@ -43,39 +43,34 @@ io.on('connection', (socket) => {
     targetLanguage: null
   })
 
+  const currentActiveCount = activeConnections.size
+  console.log(`👥 Active connections: ${currentActiveCount}`)
+  io.emit('connectionCount', currentActiveCount)
+
   socket.on('speechTranscription', async (data) => {
     try {
       console.log(`🎤 Received: "${data.transcription}"`)
       
-      const { transcription, sourceLanguage, targetLanguage, bubbleId } = data
+      const { transcription, sourceLanguage, bubbleId } = data
       
       const connection = activeConnections.get(socket.id)
       if (connection) {
         connection.isStreaming = true
         connection.sourceLanguage = sourceLanguage
-        connection.targetLanguage = targetLanguage
       }
 
-      const translatedText = await processTranscription(transcription, sourceLanguage, targetLanguage)
+      io.emit('transcription', {
+        type: 'transcription',
+        originalText: transcription,
+        sourceLanguage,
+        bubbleId,
+        timestamp: new Date().toISOString()
+      })
       
-      if (translatedText) {
-        console.log(`📤 Broadcasting translation to ${io.engine.clientsCount} clients`)
-        io.emit('translation', {
-          type: 'translation',
-          originalText: transcription,
-          translatedText,
-          sourceLanguage,
-          targetLanguage,
-          bubbleId,
-          timestamp: new Date().toISOString()
-        })
-        
-        // Also send completion notification to the input client
-        socket.emit('transcriptionComplete', {
-          type: 'transcriptionComplete',
-          bubbleId
-        })
-      }
+      socket.emit('transcriptionComplete', {
+        type: 'transcriptionComplete',
+        bubbleId
+      })
       
     } catch (error) {
       console.error('Error processing speech transcription:', error)
@@ -119,10 +114,17 @@ io.on('connection', (socket) => {
     console.log(`Client ${socket.id} stopped streaming`)
   })
 
+  socket.on('getConnectionCount', () => {
+    const currentActiveCount = activeConnections.size
+    socket.emit('connectionCount', currentActiveCount)
+  })
+
   socket.on('disconnect', () => {
-    console.log(`🔌 Client disconnected: ${socket.id}`)
     activeConnections.delete(socket.id)
-    console.log(`📡 Remaining connections: ${io.engine.clientsCount}`)
+    const currentActiveCount = activeConnections.size - 1
+    console.log(`📡 Remaining active connections: ${currentActiveCount}`)
+    
+    io.emit('connectionCount', currentActiveCount)
   })
 })
 
@@ -190,13 +192,34 @@ app.get('/api/languages', (req, res) => {
   res.json(languages)
 })
 
-// Error handling middleware
+app.post('/api/translate', async (req, res) => {
+  try {
+    const { text, from, to } = req.body
+    
+    if (!text || !from || !to) {
+      return res.status(400).json({ error: 'Missing required fields: text, from, to' })
+    }
+
+    const translatedText = await processTranscription(text, from, to)
+    
+    res.json({
+      translatedText,
+      originalText: text,
+      sourceLanguage: from,
+      targetLanguage: to
+    })
+    
+  } catch (error) {
+    console.error('Translation API error:', error)
+    res.status(500).json({ error: 'Translation failed' })
+  }
+})
+
 app.use((err, req, res, next) => {
   console.error(err.stack)
   res.status(500).json({ error: 'Something went wrong!' })
 })
 
-// 404 handler
 app.use((req, res) => {
   res.status(404).json({ error: 'Route not found' })
 })
@@ -204,11 +227,6 @@ app.use((req, res) => {
 const PORT = process.env.PORT || 3001
 
 server.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 Tongues Backend Server running on port ${PORT}`)
-  console.log(`📡 WebSocket server ready for real-time connections`)
-  console.log(`🌐 Health check: http://localhost:${PORT}/api/health`)
-  console.log(`📚 Languages API: http://localhost:${PORT}/api/languages`)
-  console.log(`🔌 WebSocket status: http://localhost:${PORT}/api/websocket-status`)
   console.log(`🎤 Input Client: http://localhost:5173`)
   console.log(`🌍 Translation Client: http://localhost:5174`)
 })
