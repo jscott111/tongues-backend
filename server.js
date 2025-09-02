@@ -32,6 +32,20 @@ app.use(express.static(path.join(__dirname, 'public')))
 
 const activeConnections = new Map()
 
+const emitConnectionCount = () => {
+  const connectionsByLanguage = {}
+  activeConnections.forEach((connection) => {
+    if (connection.targetLanguage) {
+      connectionsByLanguage[connection.targetLanguage] = (connectionsByLanguage[connection.targetLanguage] || 0) + 1
+    }
+  })
+  
+  io.emit('connectionCount', {
+    total: activeConnections.size,
+    byLanguage: connectionsByLanguage
+  })
+}
+
 io.on('connection', (socket) => {
   console.log(`🔌 Client connected: ${socket.id}`)
   console.log(`📡 Total connections: ${io.engine.clientsCount}`)
@@ -45,7 +59,8 @@ io.on('connection', (socket) => {
 
   const currentActiveCount = activeConnections.size
   console.log(`👥 Active connections: ${currentActiveCount}`)
-  io.emit('connectionCount', currentActiveCount)
+  
+  emitConnectionCount()
 
   socket.on('speechTranscription', async (data) => {
     try {
@@ -58,6 +73,8 @@ io.on('connection', (socket) => {
         connection.isStreaming = true
         connection.sourceLanguage = sourceLanguage
       }
+
+      emitConnectionCount()
 
       io.emit('transcription', {
         type: 'transcription',
@@ -114,9 +131,27 @@ io.on('connection', (socket) => {
     console.log(`Client ${socket.id} stopped streaming`)
   })
 
+  socket.on('setTargetLanguage', (data) => {
+    const connection = activeConnections.get(socket.id)
+    if (connection) {
+      connection.targetLanguage = data.targetLanguage
+      console.log(`🎯 Client ${socket.id} set target language to ${data.targetLanguage}`)
+      emitConnectionCount()
+    }
+  })
+
   socket.on('getConnectionCount', () => {
-    const currentActiveCount = activeConnections.size
-    socket.emit('connectionCount', currentActiveCount)
+    const connectionsByLanguage = {}
+    activeConnections.forEach((connection) => {
+      if (connection.targetLanguage) {
+        connectionsByLanguage[connection.targetLanguage] = (connectionsByLanguage[connection.targetLanguage] || 0)
+      }
+    })
+    
+    socket.emit('connectionCount', {
+      total: activeConnections.size,
+      byLanguage: connectionsByLanguage
+    })
   })
 
   socket.on('disconnect', () => {
@@ -124,7 +159,7 @@ io.on('connection', (socket) => {
     const currentActiveCount = activeConnections.size
     console.log(`📡 Remaining active connections: ${currentActiveCount}`)
     
-    io.emit('connectionCount', currentActiveCount)
+    emitConnectionCount()
   })
 })
 
