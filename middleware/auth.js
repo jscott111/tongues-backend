@@ -1,8 +1,9 @@
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
+const config = require('../config');
 
-// JWT secret - in production, this should be in environment variables
-const JWT_SECRET = process.env.JWT_SECRET || 'your-super-secret-jwt-key-change-this-in-production';
+// JWT configuration from environment
+const JWT_SECRET = config.JWT_SECRET;
 
 /**
  * Middleware to authenticate JWT tokens
@@ -118,7 +119,7 @@ const generateToken = (user) => {
     },
     JWT_SECRET,
     { 
-      expiresIn: '24h',
+      expiresIn: config.JWT_ACCESS_EXPIRES_IN,
       issuer: 'scribe-backend',
       audience: 'scribe-frontend'
     }
@@ -136,7 +137,7 @@ const generateRefreshToken = (user) => {
     },
     JWT_SECRET,
     { 
-      expiresIn: '7d',
+      expiresIn: config.JWT_REFRESH_EXPIRES_IN,
       issuer: 'scribe-backend',
       audience: 'scribe-frontend'
     }

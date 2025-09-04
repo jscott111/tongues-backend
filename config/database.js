@@ -1,8 +1,9 @@
 const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
+const config = require('./index');
 
 // Database configuration
-const DB_PATH = path.join(__dirname, '..', 'data', 'scribe.db');
+const DB_PATH = path.resolve(config.DB_PATH);
 
 // Ensure data directory exists
 const fs = require('fs');

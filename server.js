@@ -5,6 +5,7 @@ const cors = require('cors')
 const path = require('path')
 require('dotenv').config()
 
+const config = require('./config')
 const { getSupportedLanguages } = require('./azureLangs')
 const { authenticateToken, authenticateSocket } = require('./middleware/auth')
 const authRoutes = require('./routes/auth')
@@ -14,14 +15,14 @@ const app = express()
 const server = http.createServer(app)
 
 app.use(cors({
-  origin: ["http://localhost:5173", "http://localhost:5174"],
+  origin: config.CORS_ORIGIN.split(','),
   methods: ["GET", "POST", "OPTIONS"],
   credentials: true
 }))
 
 const io = socketIo(server, {
   cors: {
-    origin: ["http://localhost:5173", "http://localhost:5174"],
+    origin: config.CORS_ORIGIN.split(','),
     methods: ["GET", "POST"],
     credentials: true,
     allowedHeaders: ["Content-Type", "Authorization"]
@@ -379,8 +380,8 @@ async function processTranscription(transcription, sourceLanguage, targetLanguag
     const createClient = require('@azure-rest/ai-translation-text').default
     
     const client = createClient(process.env.AZURE_TRANSLATOR_ENDPOINT, {
-      key: process.env.AZURE_TRANSLATOR_KEY,
-      region: process.env.AZURE_TRANSLATOR_REGION
+      key: config.AZURE_TRANSLATOR_KEY,
+      region: config.AZURE_TRANSLATOR_REGION
     })
     
     const azureSourceLang = sourceLanguage
@@ -492,8 +493,6 @@ app.use((req, res) => {
   res.status(404).json({ error: 'Route not found' })
 })
 
-const PORT = process.env.PORT || 3001
-
 // Initialize database and start server
 const startServer = async () => {
   try {
@@ -501,8 +500,8 @@ const startServer = async () => {
     await initDatabase()
     
     // Start server
-    server.listen(PORT, '0.0.0.0', () => {
-      console.log(`🚀 Server running on port ${PORT}`)
+    server.listen(config.PORT, config.HOST, () => {
+      console.log(`🚀 Server running on ${config.HOST}:${config.PORT}`)
       console.log(`🎤 Input Client: http://localhost:5173`)
       console.log(`🌍 Translation Client: http://localhost:5174`)
     })
