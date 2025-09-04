@@ -16,8 +16,8 @@ module.exports = {
   AZURE_TRANSLATOR_KEY: process.env.AZURE_TRANSLATOR_KEY,
   AZURE_TRANSLATOR_REGION: process.env.AZURE_TRANSLATOR_REGION,
   
-  // CORS
-  CORS_ORIGIN: process.env.CORS_ORIGIN,
+  // CORS - Allow your frontend domains
+  CORS_ORIGIN: process.env.CORS_ORIGIN || 'https://your-frontend-domain.com,https://your-translation-domain.com',
   
   // Logging
   LOG_LEVEL: 'warn'
