@@ -18,7 +18,7 @@ const authenticateToken = (req, res, next) => {
     });
   }
 
-  jwt.verify(token, JWT_SECRET, (err, decoded) => {
+  jwt.verify(token, JWT_SECRET, async (err, decoded) => {
     if (err) {
       console.error('JWT verification error:', err.message);
       return res.status(403).json({ 
@@ -27,17 +27,25 @@ const authenticateToken = (req, res, next) => {
       });
     }
 
-    // Verify user still exists and is active
-    const user = User.findUserById(decoded.userId);
-    if (!user || !user.isActive) {
-      return res.status(403).json({ 
-        error: 'User not found or deactivated',
-        code: 'USER_NOT_FOUND'
+    try {
+      // Verify user still exists and is active
+      const user = await User.findUserById(decoded.userId);
+      if (!user || !user.isActive) {
+        return res.status(403).json({ 
+          error: 'User not found or deactivated',
+          code: 'USER_NOT_FOUND'
+        });
+      }
+
+      req.user = user;
+      next();
+    } catch (error) {
+      console.error('Database error during authentication:', error);
+      return res.status(500).json({ 
+        error: 'Authentication failed',
+        code: 'DATABASE_ERROR'
       });
     }
-
-    req.user = user;
-    next();
   });
 };
 
@@ -49,42 +57,54 @@ const authenticateSocket = (socket, next) => {
   const token = socket.handshake.auth.token || socket.handshake.headers.authorization?.split(' ')[1];
   const sessionId = socket.handshake.auth.sessionId;
 
-  // If session ID is provided, allow connection without JWT authentication
+  // If session ID is provided, validate it first
   if (sessionId) {
-    console.log(`🔗 Received session ID: "${sessionId}" (length: ${sessionId.length})`);
-    // Validate session ID format - now accepts 8-character alphanumeric codes
     if (!/^[A-Z0-9]{8}$/.test(sessionId)) {
-      console.log(`🔗 Invalid session ID format: ${sessionId} (expected 8 alphanumeric characters)`);
+      console.log(`❌ Invalid session ID format: ${sessionId}`);
       return next(new Error('Invalid session ID format'));
     }
-    
     socket.sessionId = sessionId;
-    socket.user = null; // No user for session-based connections
-    console.log(`🔗 Session-based connection: ${sessionId}`);
-    console.log(`🔗 Auth data:`, socket.handshake.auth);
-    return next();
   }
 
-  // If no session ID, require JWT authentication
-  if (!token) {
+  // If token is provided, authenticate the user
+  if (token) {
+    jwt.verify(token, JWT_SECRET, async (err, decoded) => {
+      if (err) {
+        // If token is expired, allow connection but mark as needing refresh
+        if (err.name === 'TokenExpiredError') {
+          console.log('🔄 Token expired, allowing connection with session-only mode');
+          socket.user = null;
+          socket.needsTokenRefresh = true;
+          return next();
+        }
+        
+        console.error('❌ JWT verification error:', err.message);
+        return next(new Error('Invalid token'));
+      }
+
+      try {
+        const user = await User.findUserById(decoded.userId);
+        if (!user || !user.isActive) {
+          return next(new Error('User not found or deactivated'));
+        }
+
+        socket.user = user;
+        socket.needsTokenRefresh = false;
+        next();
+      } catch (error) {
+        console.error('Database error during socket authentication:', error);
+        return next(new Error('Authentication failed'));
+      }
+    });
+  } else if (sessionId) {
+    // Session-only connection (TranslationApp)
+    socket.user = null;
+    socket.needsTokenRefresh = false;
+    next();
+  } else {
+    // No token and no session ID
     return next(new Error('Authentication token or session ID required'));
   }
-
-  jwt.verify(token, JWT_SECRET, (err, decoded) => {
-    if (err) {
-      console.error('Socket JWT verification error:', err.message);
-      return next(new Error('Invalid or expired token'));
-    }
-
-    const user = User.findUserById(decoded.userId);
-    if (!user || !user.isActive) {
-      return next(new Error('User not found or deactivated'));
-    }
-
-    socket.user = user;
-    socket.sessionId = sessionId; // Store session ID if provided
-    next();
-  });
 };
 
 /**
@@ -150,20 +170,26 @@ const optionalAuth = (req, res, next) => {
     return next();
   }
 
-  jwt.verify(token, JWT_SECRET, (err, decoded) => {
+  jwt.verify(token, JWT_SECRET, async (err, decoded) => {
     if (err) {
       req.user = null;
       return next();
     }
 
-    const user = User.findUserById(decoded.userId);
-    if (!user || !user.isActive) {
-      req.user = null;
-      return next();
-    }
+    try {
+      const user = await User.findUserById(decoded.userId);
+      if (!user || !user.isActive) {
+        req.user = null;
+        return next();
+      }
 
-    req.user = user;
-    next();
+      req.user = user;
+      next();
+    } catch (error) {
+      console.error('Database error during optional authentication:', error);
+      req.user = null;
+      next();
+    }
   });
 };
 

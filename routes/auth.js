@@ -50,8 +50,17 @@ router.post('/register', validateRegistration, async (req, res) => {
 
     const { email, password, name } = req.body;
 
+    // Check if user already exists
+    const existingUser = await User.findUserByEmail(email);
+    if (existingUser) {
+      return res.status(409).json({
+        error: 'User with this email already exists',
+        code: 'USER_EXISTS'
+      });
+    }
+
     // Create user
-    const user = await User.createUser({ email, password, name });
+    const user = await User.create(name, email, password);
 
     // Generate tokens
     const accessToken = generateToken(user);
@@ -73,14 +82,6 @@ router.post('/register', validateRegistration, async (req, res) => {
 
   } catch (error) {
     console.error('Registration error:', error.message);
-    
-    if (error.message === 'User with this email already exists') {
-      return res.status(409).json({
-        error: 'User with this email already exists',
-        code: 'USER_EXISTS'
-      });
-    }
-
     res.status(500).json({
       error: 'Registration failed',
       message: error.message
@@ -106,8 +107,23 @@ router.post('/login', validateLogin, async (req, res) => {
 
     const { email, password } = req.body;
 
-    // Validate user credentials
-    const user = await User.validateUser(email, password);
+    // Find user by email
+    const user = await User.findUserByEmail(email);
+    if (!user || !user.isActive) {
+      return res.status(401).json({
+        error: 'Invalid credentials',
+        code: 'INVALID_CREDENTIALS'
+      });
+    }
+
+    // Validate password
+    const isValidPassword = await user.comparePassword(password);
+    if (!isValidPassword) {
+      return res.status(401).json({
+        error: 'Invalid credentials',
+        code: 'INVALID_CREDENTIALS'
+      });
+    }
 
     // Generate tokens
     const accessToken = generateToken(user);
@@ -129,14 +145,6 @@ router.post('/login', validateLogin, async (req, res) => {
 
   } catch (error) {
     console.error('Login error:', error.message);
-    
-    if (error.message === 'Invalid email or password' || error.message === 'Account is deactivated') {
-      return res.status(401).json({
-        error: 'Invalid credentials',
-        code: 'INVALID_CREDENTIALS'
-      });
-    }
-
     res.status(500).json({
       error: 'Login failed',
       message: error.message
@@ -163,7 +171,7 @@ router.post('/refresh', async (req, res) => {
     const { verifyRefreshToken, generateToken } = require('../middleware/auth');
     const decoded = verifyRefreshToken(refreshToken);
     
-    const user = User.findUserById(decoded.userId);
+    const user = await User.findUserById(decoded.userId);
     if (!user || !user.isActive) {
       return res.status(403).json({
         error: 'User not found or deactivated',
@@ -222,77 +230,6 @@ router.get('/me', authenticateToken, (req, res) => {
   });
 });
 
-/**
- * @route   PUT /api/auth/profile
- * @desc    Update user profile
- * @access  Private
- */
-router.put('/profile', authenticateToken, [
-  body('name')
-    .optional()
-    .trim()
-    .isLength({ min: 2, max: 50 })
-    .withMessage('Name must be between 2 and 50 characters'),
-  body('email')
-    .optional()
-    .isEmail()
-    .normalizeEmail()
-    .withMessage('Please provide a valid email address')
-], async (req, res) => {
-  try {
-    // Check for validation errors
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({
-        error: 'Validation failed',
-        details: errors.array()
-      });
-    }
 
-    const { name, email } = req.body;
-    const updateData = {};
-
-    if (name !== undefined) updateData.name = name;
-    if (email !== undefined) updateData.email = email;
-
-    if (Object.keys(updateData).length === 0) {
-      return res.status(400).json({
-        error: 'No valid fields to update'
-      });
-    }
-
-    // Check if email is already taken by another user
-    if (email && email !== req.user.email) {
-      const existingUser = User.findUserByEmail(email);
-      if (existingUser && existingUser.id !== req.user.id) {
-        return res.status(409).json({
-          error: 'Email is already taken by another user',
-          code: 'EMAIL_TAKEN'
-        });
-      }
-    }
-
-    const updatedUser = User.updateUser(req.user.id, updateData);
-
-    res.json({
-      message: 'Profile updated successfully',
-      user: {
-        id: updatedUser.id,
-        email: updatedUser.email,
-        name: updatedUser.name,
-        createdAt: updatedUser.createdAt,
-        updatedAt: updatedUser.updatedAt
-      }
-    });
-
-  } catch (error) {
-    console.error('Profile update error:', error.message);
-    
-    res.status(500).json({
-      error: 'Profile update failed',
-      message: error.message
-    });
-  }
-});
 
 module.exports = router;

@@ -8,6 +8,7 @@ require('dotenv').config()
 const { getSupportedLanguages } = require('./azureLangs')
 const { authenticateToken, authenticateSocket } = require('./middleware/auth')
 const authRoutes = require('./routes/auth')
+const { initDatabase } = require('./config/database')
 
 const app = express()
 const server = http.createServer(app)
@@ -67,12 +68,10 @@ const emitConnectionCount = (sessionId = null) => {
   }
   
   if (sessionId) {
-    // Emit to all connections in the same session
     const sessionConnections = Array.from(activeConnections.entries())
       .filter(([_, conn]) => conn.sessionId === sessionId)
       .map(([socketId, _]) => socketId)
     
-    console.log(`📊 Emitting connection count for session ${sessionId}:`, connectionData)
     
     sessionConnections.forEach(socketId => {
       const targetSocket = io.sockets.sockets.get(socketId)
@@ -96,12 +95,7 @@ const emitConnectionCount = (sessionId = null) => {
 }
 
 io.on('connection', (socket) => {
-  console.log(`🔌 Client connected: ${socket.id}`)
-  console.log(`👤 User: ${socket.user?.email || 'Anonymous'}`)
-  console.log(`🔗 Session: ${socket.sessionId || 'None'}`)
-  console.log(`📡 Total connections: ${io.engine.clientsCount}`)
-  console.log(`🌐 Client origin: ${socket.handshake.headers.origin}`)
-  console.log(`🔗 Auth data:`, socket.handshake.auth)
+  console.log(`🔌 Client connected: ${socket.user?.email || 'Anonymous'} (${socket.sessionId || 'No Session'})`)
   
   activeConnections.set(socket.id, {
     userId: socket.user?.id,
@@ -109,22 +103,91 @@ io.on('connection', (socket) => {
     sessionId: socket.sessionId,
     isStreaming: false,
     sourceLanguage: null,
-    targetLanguage: null
+    targetLanguage: null,
+    needsTokenRefresh: socket.needsTokenRefresh || false
   })
 
-  const currentActiveCount = activeConnections.size
-  console.log(`👥 Active connections: ${currentActiveCount}`)
-  console.log(`🔗 All active connections:`, Array.from(activeConnections.values()).map(c => ({ 
-    sessionId: c.sessionId, 
-    userEmail: c.userEmail,
-    targetLanguage: c.targetLanguage 
-  })))
+  // Notify client if they need to refresh their token
+  if (socket.needsTokenRefresh) {
+    socket.emit('tokenExpired', {
+      message: 'Your session has expired. Please refresh your token.',
+      code: 'TOKEN_EXPIRED'
+    })
+  }
   
   emitConnectionCount(socket.sessionId)
 
+  // Handle token refresh requests
+  socket.on('refreshToken', async (data) => {
+    try {
+      const { refreshToken } = data
+      
+      if (!refreshToken) {
+        socket.emit('tokenRefreshError', { message: 'Refresh token required' })
+        return
+      }
+
+      // Verify refresh token
+      const jwt = require('jsonwebtoken')
+      const JWT_SECRET = process.env.JWT_SECRET || 'your-super-secret-jwt-key-change-this-in-production'
+      
+      jwt.verify(refreshToken, JWT_SECRET, async (err, decoded) => {
+        if (err) {
+          socket.emit('tokenRefreshError', { message: 'Invalid refresh token' })
+          return
+        }
+
+        try {
+          const user = await User.findUserById(decoded.userId)
+          if (!user || !user.isActive) {
+            socket.emit('tokenRefreshError', { message: 'User not found' })
+            return
+          }
+
+          // Generate new tokens
+          const { generateToken, generateRefreshToken } = require('./middleware/auth')
+          const newAccessToken = generateToken(user)
+          const newRefreshToken = generateRefreshToken(user)
+
+          // Update socket user and clear refresh flag
+          socket.user = user
+          socket.needsTokenRefresh = false
+          
+          // Update connection info
+          const connection = activeConnections.get(socket.id)
+          if (connection) {
+            connection.userId = user.id
+            connection.userEmail = user.email
+            connection.needsTokenRefresh = false
+          }
+
+          socket.emit('tokenRefreshed', {
+            accessToken: newAccessToken,
+            refreshToken: newRefreshToken
+          })
+
+          console.log(`🔄 Token refreshed: ${user.email}`)
+        } catch (error) {
+          console.error('Error refreshing token:', error)
+          socket.emit('tokenRefreshError', { message: 'Token refresh failed' })
+        }
+      })
+    } catch (error) {
+      console.error('Token refresh error:', error)
+      socket.emit('tokenRefreshError', { message: 'Token refresh failed' })
+    }
+  })
+
   socket.on('speechTranscription', async (data) => {
     try {
-      console.log(`🎤 Received: "${data.transcription}"`)
+      // Check if socket needs token refresh
+      if (socket.needsTokenRefresh) {
+        socket.emit('tokenExpired', {
+          message: 'Your session has expired. Please refresh your token.',
+          code: 'TOKEN_EXPIRED'
+        })
+        return
+      }
       
       const { transcription, sourceLanguage, bubbleId } = data
       
@@ -134,48 +197,79 @@ io.on('connection', (socket) => {
         connection.sourceLanguage = sourceLanguage
       }
 
-      // Emit transcription to all connections with the same session ID
       const currentConnection = activeConnections.get(socket.id)
-      console.log(`🎤 Current connection:`, currentConnection)
       emitConnectionCount(currentConnection?.sessionId)
+      
       if (currentConnection?.sessionId) {
-        // Find all connections with the same session ID
         const sessionConnections = Array.from(activeConnections.entries())
           .filter(([_, conn]) => conn.sessionId === currentConnection.sessionId)
           .map(([socketId, _]) => socketId)
         
-        console.log(`🎤 Session connections for ${currentConnection.sessionId}:`, sessionConnections)
+        // Find TranslationApp connections (those without userId) and translate for them
+        const translationConnections = sessionConnections.filter(socketId => {
+          const conn = activeConnections.get(socketId)
+          return conn && !conn.userId && conn.targetLanguage
+        })
         
-        // Emit to all sockets in the same session
+        // Send original transcription to InputApp (authenticated connections)
         sessionConnections.forEach(socketId => {
           const targetSocket = io.sockets.sockets.get(socketId)
-          if (targetSocket) {
-            console.log(`🎤 Emitting transcription to socket ${socketId}`)
-            targetSocket.emit('transcription', {
-              type: 'transcription',
-              originalText: transcription,
+          const conn = activeConnections.get(socketId)
+          if (targetSocket && conn?.userId) {
+            targetSocket.emit('transcriptionComplete', {
+              transcription,
               sourceLanguage,
               bubbleId,
-              timestamp: new Date().toISOString()
+              userId: currentConnection.userId,
+              userEmail: currentConnection.userEmail
             })
           }
         })
+        
+        // Translate and send to TranslationApp connections
+        if (translationConnections.length > 0) {
+          try {
+            for (const socketId of translationConnections) {
+              const conn = activeConnections.get(socketId)
+              if (conn?.targetLanguage) {
+                const translatedText = await processTranscription(transcription, sourceLanguage, conn.targetLanguage)
+                const targetSocket = io.sockets.sockets.get(socketId)
+                if (targetSocket) {
+                  targetSocket.emit('translationComplete', {
+                    originalText: transcription,
+                    translatedText,
+                    sourceLanguage,
+                    targetLanguage: conn.targetLanguage,
+                    bubbleId,
+                    userId: currentConnection.userId,
+                    userEmail: currentConnection.userEmail
+                  })
+                }
+              }
+            }
+          } catch (error) {
+            console.error('Translation error:', error)
+            // Send error to translation connections
+            translationConnections.forEach(socketId => {
+              const targetSocket = io.sockets.sockets.get(socketId)
+              if (targetSocket) {
+                targetSocket.emit('translationError', {
+                  error: 'Translation failed',
+                  bubbleId
+                })
+              }
+            })
+          }
+        }
       } else {
-        console.log(`🎤 No session ID, emitting to all connections`)
-        // Fallback: emit to all connections (for backward compatibility)
-        io.emit('transcription', {
-          type: 'transcription',
-          originalText: transcription,
+        io.emit('transcriptionComplete', {
+          transcription,
           sourceLanguage,
           bubbleId,
-          timestamp: new Date().toISOString()
+          userId: currentConnection?.userId,
+          userEmail: currentConnection?.userEmail
         })
       }
-      
-      socket.emit('transcriptionComplete', {
-        type: 'transcriptionComplete',
-        bubbleId
-      })
       
     } catch (error) {
       console.error('Error processing speech transcription:', error)
@@ -216,14 +310,12 @@ io.on('connection', (socket) => {
     if (connection) {
       connection.isStreaming = false
     }
-    console.log(`Client ${socket.id} stopped streaming`)
   })
 
   socket.on('setTargetLanguage', (data) => {
     const connection = activeConnections.get(socket.id)
     if (connection) {
       connection.targetLanguage = data.targetLanguage
-      console.log(`🎯 Client ${socket.id} set target language to ${data.targetLanguage}`)
       emitConnectionCount(connection.sessionId)
     }
   })
@@ -232,18 +324,14 @@ io.on('connection', (socket) => {
     const currentConnection = activeConnections.get(socket.id)
     const sessionId = currentConnection?.sessionId
     
-    console.log(`📊 getConnectionCount requested by socket ${socket.id}, session: ${sessionId}`)
-    
     const connectionsByLanguage = {}
     let totalConnections = 0
     
     activeConnections.forEach((connection) => {
-      // Only count connections in the same session
       if (sessionId && connection.sessionId !== sessionId) {
         return
       }
       
-      // Only count connections that have a valid session ID
       if (!connection.sessionId) {
         return
       }
@@ -259,15 +347,12 @@ io.on('connection', (socket) => {
       byLanguage: connectionsByLanguage
     }
     
-    console.log(`📊 Emitting connection count for session ${sessionId}:`, connectionData)
     socket.emit('connectionCount', connectionData)
   })
 
   socket.on('disconnect', () => {
     const connection = activeConnections.get(socket.id)
     activeConnections.delete(socket.id)
-    const currentActiveCount = activeConnections.size
-    console.log(`📡 Remaining active connections: ${currentActiveCount}`)
     
     emitConnectionCount(connection?.sessionId)
   })
@@ -341,6 +426,7 @@ app.get('/api/languages', authenticateToken, (req, res) => {
   res.json(languages)
 })
 
+// Authenticated translation endpoint
 app.post('/api/translate', authenticateToken, async (req, res) => {
   try {
     const { text, from, to } = req.body
@@ -366,6 +452,37 @@ app.post('/api/translate', authenticateToken, async (req, res) => {
   }
 })
 
+// Session-based translation endpoint for TranslationApp
+app.post('/api/translate/session', async (req, res) => {
+  try {
+    const { text, from, to, sessionId } = req.body
+    
+    if (!text || !from || !to || !sessionId) {
+      return res.status(400).json({ error: 'Missing required fields: text, from, to, sessionId' })
+    }
+
+    // Validate session ID format
+    if (!/^[A-Z0-9]{8}$/.test(sessionId)) {
+      return res.status(400).json({ error: 'Invalid session ID format' })
+    }
+
+    console.log(`🌍 Session ${sessionId} translating: "${text}" (${from} → ${to})`)
+    const translatedText = await processTranscription(text, from, to)
+    
+    res.json({
+      translatedText,
+      originalText: text,
+      sourceLanguage: from,
+      targetLanguage: to,
+      sessionId
+    })
+    
+  } catch (error) {
+    console.error('Session translation API error:', error)
+    res.status(500).json({ error: 'Translation failed' })
+  }
+})
+
 app.use((err, req, res, next) => {
   console.error(err.stack)
   res.status(500).json({ error: 'Something went wrong!' })
@@ -377,10 +494,25 @@ app.use((req, res) => {
 
 const PORT = process.env.PORT || 3001
 
-server.listen(PORT, '0.0.0.0', () => {
-  console.log(`🎤 Input Client: http://localhost:5173`)
-  console.log(`🌍 Translation Client: http://localhost:5174`)
-})
+// Initialize database and start server
+const startServer = async () => {
+  try {
+    // Initialize database
+    await initDatabase()
+    
+    // Start server
+    server.listen(PORT, '0.0.0.0', () => {
+      console.log(`🚀 Server running on port ${PORT}`)
+      console.log(`🎤 Input Client: http://localhost:5173`)
+      console.log(`🌍 Translation Client: http://localhost:5174`)
+    })
+  } catch (error) {
+    console.error('Failed to start server:', error)
+    process.exit(1)
+  }
+}
+
+startServer()
 
 process.on('SIGTERM', () => {
   console.log('SIGTERM received, shutting down gracefully')

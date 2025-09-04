@@ -1,131 +1,167 @@
 const bcrypt = require('bcrypt');
+const { runQuery, getQuery, allQuery } = require('../config/database');
 
 class User {
-  constructor() {
-    // In-memory storage for demo purposes
-    // In production, you'd use a proper database like MongoDB, PostgreSQL, etc.
-    this.users = new Map();
-    this.nextId = 1;
+  constructor(data) {
+    this.id = data.id;
+    this.name = data.name;
+    this.email = data.email;
+    this.passwordHash = data.password_hash;
+    this.isActive = data.is_active;
+    this.createdAt = data.created_at;
+    this.updatedAt = data.updated_at;
   }
 
-  async createUser(userData) {
-    const { email, password, name } = userData;
-    
-    // Check if user already exists
-    if (this.findUserByEmail(email)) {
-      throw new Error('User with this email already exists');
+  static async create(name, email, password) {
+    try {
+      const hashedPassword = await bcrypt.hash(password, 12);
+      
+      const result = await runQuery(
+        `INSERT INTO users (name, email, password_hash) VALUES (?, ?, ?)`,
+        [name, email, hashedPassword]
+      );
+
+      // Fetch the created user
+      const userData = await getQuery(
+        `SELECT * FROM users WHERE id = ?`,
+        [result.id]
+      );
+
+      return new User(userData);
+    } catch (error) {
+      console.error('Error creating user:', error);
+      throw error;
     }
+  }
 
-    // Hash password
-    const saltRounds = 12;
-    const hashedPassword = await bcrypt.hash(password, saltRounds);
+  async comparePassword(candidatePassword) {
+    return bcrypt.compare(candidatePassword, this.passwordHash);
+  }
 
-    // Create user object
-    const user = {
-      id: this.nextId++,
-      email: email.toLowerCase().trim(),
-      password: hashedPassword,
-      name: name.trim(),
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      isActive: true
+  static async findUserByEmail(email) {
+    try {
+      const userData = await getQuery(
+        `SELECT * FROM users WHERE email = ? AND is_active = 1`,
+        [email]
+      );
+
+      if (!userData) {
+        return null;
+      }
+
+      return new User(userData);
+    } catch (error) {
+      console.error('Error finding user by email:', error);
+      throw error;
+    }
+  }
+
+  static async findUserById(id) {
+    try {
+      const userData = await getQuery(
+        `SELECT * FROM users WHERE id = ? AND is_active = 1`,
+        [id]
+      );
+
+      if (!userData) {
+        return null;
+      }
+
+      return new User(userData);
+    } catch (error) {
+      console.error('Error finding user by ID:', error);
+      throw error;
+    }
+  }
+
+  static async getAllUsers() {
+    try {
+      const usersData = await allQuery(
+        `SELECT id, name, email, is_active, created_at, updated_at FROM users ORDER BY created_at DESC`
+      );
+
+      return usersData.map(userData => ({
+        id: userData.id,
+        name: userData.name,
+        email: userData.email,
+        isActive: userData.is_active,
+        createdAt: userData.created_at,
+        updatedAt: userData.updated_at
+      }));
+    } catch (error) {
+      console.error('Error getting all users:', error);
+      throw error;
+    }
+  }
+
+  static async updateUser(id, updateData) {
+    try {
+      const allowedFields = ['name', 'email'];
+      const updates = [];
+      const values = [];
+
+      for (const field of allowedFields) {
+        if (updateData[field] !== undefined) {
+          updates.push(`${field} = ?`);
+          values.push(updateData[field]);
+        }
+      }
+
+      if (updates.length === 0) {
+        throw new Error('No valid fields to update');
+      }
+
+      updates.push('updated_at = CURRENT_TIMESTAMP');
+      values.push(id);
+
+      await runQuery(
+        `UPDATE users SET ${updates.join(', ')} WHERE id = ?`,
+        values
+      );
+
+      // Fetch the updated user
+      const userData = await getQuery(
+        `SELECT * FROM users WHERE id = ?`,
+        [id]
+      );
+
+      return new User(userData);
+    } catch (error) {
+      console.error('Error updating user:', error);
+      throw error;
+    }
+  }
+
+  static async deactivateUser(id) {
+    try {
+      await runQuery(
+        `UPDATE users SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+        [id]
+      );
+
+      // Fetch the updated user
+      const userData = await getQuery(
+        `SELECT * FROM users WHERE id = ?`,
+        [id]
+      );
+
+      return new User(userData);
+    } catch (error) {
+      console.error('Error deactivating user:', error);
+      throw error;
+    }
+  }
+
+  toJSON() {
+    return {
+      id: this.id,
+      name: this.name,
+      email: this.email,
+      isActive: this.isActive,
+      createdAt: this.createdAt,
+      updatedAt: this.updatedAt
     };
-
-    // Store user
-    this.users.set(user.id, user);
-    
-    // Return user without password
-    const { password: _, ...userWithoutPassword } = user;
-    return userWithoutPassword;
-  }
-
-  async validateUser(email, password) {
-    const user = this.findUserByEmail(email);
-    
-    if (!user) {
-      throw new Error('Invalid email or password');
-    }
-
-    if (!user.isActive) {
-      throw new Error('Account is deactivated');
-    }
-
-    const isValidPassword = await bcrypt.compare(password, user.password);
-    
-    if (!isValidPassword) {
-      throw new Error('Invalid email or password');
-    }
-
-    // Return user without password
-    const { password: _, ...userWithoutPassword } = user;
-    return userWithoutPassword;
-  }
-
-  findUserByEmail(email) {
-    for (const user of this.users.values()) {
-      if (user.email === email.toLowerCase().trim()) {
-        return user;
-      }
-    }
-    return null;
-  }
-
-  findUserById(id) {
-    const user = this.users.get(parseInt(id));
-    if (user) {
-      const { password: _, ...userWithoutPassword } = user;
-      return userWithoutPassword;
-    }
-    return null;
-  }
-
-  updateUser(id, updateData) {
-    const user = this.users.get(parseInt(id));
-    
-    if (!user) {
-      throw new Error('User not found');
-    }
-
-    // Update allowed fields
-    const allowedFields = ['name', 'email'];
-    const updatedUser = { ...user };
-    
-    for (const field of allowedFields) {
-      if (updateData[field] !== undefined) {
-        updatedUser[field] = updateData[field];
-      }
-    }
-    
-    updatedUser.updatedAt = new Date().toISOString();
-    this.users.set(parseInt(id), updatedUser);
-    
-    const { password: _, ...userWithoutPassword } = updatedUser;
-    return userWithoutPassword;
-  }
-
-  deactivateUser(id) {
-    const user = this.users.get(parseInt(id));
-    
-    if (!user) {
-      throw new Error('User not found');
-    }
-
-    user.isActive = false;
-    user.updatedAt = new Date().toISOString();
-    this.users.set(parseInt(id), user);
-    
-    const { password: _, ...userWithoutPassword } = user;
-    return userWithoutPassword;
-  }
-
-  getAllUsers() {
-    const users = [];
-    for (const user of this.users.values()) {
-      const { password: _, ...userWithoutPassword } = user;
-      users.push(userWithoutPassword);
-    }
-    return users;
   }
 }
 
-module.exports = new User();
+module.exports = User;
