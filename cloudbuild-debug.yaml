@@ -1,0 +1,78 @@
+steps:
+  # Build the container image
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['build', '-t', 'gcr.io/$PROJECT_ID/scribe-backend:$COMMIT_SHA', '.']
+  
+  # Push the container image to Container Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'gcr.io/$PROJECT_ID/scribe-backend:$COMMIT_SHA']
+  
+  # Check if service exists and get current status
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: bash
+    args:
+      - '-c'
+      - |
+        echo "Checking if service exists..."
+        gcloud run services describe scribe-backend --region=us-central1 --format='value(status.url)' || echo "Service does not exist yet"
+        
+        echo "Listing all services in region..."
+        gcloud run services list --region=us-central1
+        
+        echo "Checking IAM permissions..."
+        gcloud projects get-iam-policy $PROJECT_ID --flatten="bindings[].members" --format="table(bindings.role)" --filter="bindings.members:*@cloudbuild.gserviceaccount.com"
+  
+  # Deploy container image to Cloud Run
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - 'run'
+      - 'deploy'
+      - 'scribe-backend'
+      - '--image'
+      - 'gcr.io/$PROJECT_ID/scribe-backend:$COMMIT_SHA'
+      - '--region'
+      - 'us-central1'
+      - '--platform'
+      - 'managed'
+      - '--allow-unauthenticated'
+      - '--port'
+      - '3001'
+      - '--memory'
+      - '512Mi'
+      - '--cpu'
+      - '1'
+      - '--max-instances'
+      - '10'
+      - '--timeout'
+      - '300'
+      - '--concurrency'
+      - '100'
+      - '--set-env-vars'
+      - 'NODE_ENV=prod'
+      - '--quiet'
+  
+  # Verify deployment
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: bash
+    args:
+      - '-c'
+      - |
+        echo "Getting service URL..."
+        SERVICE_URL=$(gcloud run services describe scribe-backend --region=us-central1 --format='value(status.url)')
+        echo "Service URL: $SERVICE_URL"
+        
+        echo "Testing health endpoint..."
+        curl -f "$SERVICE_URL/api/health" || echo "Health check failed"
+        
+        echo "Getting service details..."
+        gcloud run services describe scribe-backend --region=us-central1
+
+# Store images in Google Container Registry
+images:
+  - 'gcr.io/$PROJECT_ID/scribe-backend:$COMMIT_SHA'
+
+# Build options
+options:
+  logging: CLOUD_LOGGING_ONLY
+  machineType: 'E2_HIGHCPU_8'
