@@ -9,7 +9,18 @@ const config = require('./config')
 const { getSupportedLanguages } = require('./azureLangs')
 const { authenticateToken, authenticateSocket } = require('./middleware/auth')
 const authRoutes = require('./routes/auth')
-const { initDatabase } = require('./config/database')
+
+// Debug: Log environment variables
+console.log('🔍 Environment variables debug:');
+console.log('  NODE_ENV:', process.env.NODE_ENV);
+console.log('  DB_HOST:', process.env.DB_HOST);
+console.log('  DB_NAME:', process.env.DB_NAME);
+console.log('  DB_USER:', process.env.DB_USER);
+console.log('  DB_PASSWORD:', process.env.DB_PASSWORD ? '[SET]' : '[NOT SET]');
+console.log('  All DB_ variables:', Object.keys(process.env).filter(key => key.startsWith('DB_')));
+
+// Import PostgreSQL database module
+const { initDatabase } = require('./config/database-postgres');
 
 const app = express()
 const server = http.createServer(app)

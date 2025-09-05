@@ -22,7 +22,7 @@ module.exports = {
   AZURE_TRANSLATOR_REGION: process.env.AZURE_TRANSLATOR_REGION,
   
   // CORS - Allow your frontend domains
-  CORS_ORIGIN: process.env.CORS_ORIGIN || 'https://speaker.yourdomain.com,https://listener.yourdomain.com',
+  CORS_ORIGIN: process.env.CORS_ORIGIN || 'https://speaker.scribe-ai.com,https://listener.scribe-ai.com',
   
   // Logging
   LOG_LEVEL: 'warn'
