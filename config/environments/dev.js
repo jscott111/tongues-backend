@@ -17,7 +17,7 @@ module.exports = {
   AZURE_TRANSLATOR_REGION: process.env.AZURE_TRANSLATOR_REGION || 'your-azure-region-here',
   
   // CORS
-  CORS_ORIGIN: 'http://127.0.0.1:5173,http://127.0.0.1:5174',
+  CORS_ORIGIN: 'http://speaker.localhost:5173,http://listener.localhost:5173',
   
   // Logging
   LOG_LEVEL: 'debug'
