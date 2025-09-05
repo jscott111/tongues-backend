@@ -20,9 +20,10 @@ module.exports = {
   // Azure Translator
   AZURE_TRANSLATOR_KEY: process.env.AZURE_TRANSLATOR_KEY,
   AZURE_TRANSLATOR_REGION: process.env.AZURE_TRANSLATOR_REGION,
+  AZURE_TRANSLATOR_ENDPOINT: process.env.AZURE_TRANSLATOR_ENDPOINT || 'https://api.cognitive.microsofttranslator.com',
   
   // CORS - Allow your frontend domains
-  CORS_ORIGIN: process.env.CORS_ORIGIN || 'https://speaker.yourdomain.com,https://listener.yourdomain.com',
+  CORS_ORIGIN: process.env.CORS_ORIGIN || 'https://speaker.scribe-ai.ca,https://listener.scribe-ai.ca,https://api.scribe-ai.ca',
   
   // Logging
   LOG_LEVEL: 'warn'

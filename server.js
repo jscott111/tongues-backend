@@ -9,23 +9,42 @@ const config = require('./config')
 const { getSupportedLanguages } = require('./azureLangs')
 const { authenticateToken, authenticateSocket } = require('./middleware/auth')
 const authRoutes = require('./routes/auth')
-const { initDatabase } = require('./config/database')
+
+// Debug: Log environment variables
+console.log('🔍 Environment variables debug:');
+console.log('  NODE_ENV:', process.env.NODE_ENV);
+console.log('  DB_HOST:', process.env.DB_HOST);
+console.log('  DB_NAME:', process.env.DB_NAME);
+console.log('  DB_USER:', process.env.DB_USER);
+console.log('  DB_PASSWORD:', process.env.DB_PASSWORD ? '[SET]' : '[NOT SET]');
+console.log('  All DB_ variables:', Object.keys(process.env).filter(key => key.startsWith('DB_')));
+
+// Import PostgreSQL database module
+const { initDatabase } = require('./config/database-postgres');
 
 const app = express()
 const server = http.createServer(app)
 
+// Debug CORS configuration
+console.log('🔍 CORS Configuration Debug:');
+console.log('  CORS_ORIGIN:', config.CORS_ORIGIN);
+console.log('  Split origins:', config.CORS_ORIGIN.split(','));
+
 app.use(cors({
-  origin: config.CORS_ORIGIN.split(','),
+  origin: config.CORS_ORIGIN.split(',').map(origin => origin.trim()),
   methods: ["GET", "POST", "OPTIONS"],
-  credentials: true
+  credentials: true,
+  allowedHeaders: ["Content-Type", "Authorization"],
+  optionsSuccessStatus: 200
 }))
 
 const io = socketIo(server, {
   cors: {
-    origin: config.CORS_ORIGIN.split(','),
-    methods: ["GET", "POST"],
+    origin: true, // Allow all origins for socket connections
+    methods: ["GET", "POST", "OPTIONS"],
     credentials: true,
-    allowedHeaders: ["Content-Type", "Authorization"]
+    allowedHeaders: ["Content-Type", "Authorization"],
+    optionsSuccessStatus: 200
   },
   transports: ['websocket', 'polling'],
   allowEIO3: true
@@ -377,9 +396,15 @@ async function processTranscription(transcription, sourceLanguage, targetLanguag
   try {
     console.log(`🌍 Processing: "${transcription}" (${sourceLanguage} → ${targetLanguage})`)
     
+    // Debug: Log Azure configuration
+    console.log('🔍 Azure Translator Config Debug:');
+    console.log('  Endpoint:', config.AZURE_TRANSLATOR_ENDPOINT);
+    console.log('  Key:', config.AZURE_TRANSLATOR_KEY ? '[SET]' : '[NOT SET]');
+    console.log('  Region:', config.AZURE_TRANSLATOR_REGION);
+    
     const createClient = require('@azure-rest/ai-translation-text').default
     
-    const client = createClient(process.env.AZURE_TRANSLATOR_ENDPOINT, {
+    const client = createClient(config.AZURE_TRANSLATOR_ENDPOINT, {
       key: config.AZURE_TRANSLATOR_KEY,
       region: config.AZURE_TRANSLATOR_REGION
     })
@@ -398,11 +423,24 @@ async function processTranscription(transcription, sourceLanguage, targetLanguag
       }
     })
     
+    // Debug: Log the full response
+    console.log('🔍 Azure Translator Response Debug:');
+    console.log('  Status:', result.status);
+    console.log('  Headers:', result.headers);
+    console.log('  Body:', JSON.stringify(result.body, null, 2));
+    
     if (result.body && result.body[0] && result.body[0].translations && result.body[0].translations[0]) {
       const translatedText = result.body[0].translations[0].text
       console.log(`✅ Translated: "${transcription}" → "${translatedText}"`)
       return translatedText
     } else {
+      console.error('❌ Invalid response structure:', {
+        hasBody: !!result.body,
+        bodyLength: result.body?.length,
+        firstItem: result.body?.[0],
+        hasTranslations: result.body?.[0]?.translations,
+        translationsLength: result.body?.[0]?.translations?.length
+      });
       throw new Error('Invalid response from Azure Translator')
     }
     
@@ -414,12 +452,23 @@ async function processTranscription(transcription, sourceLanguage, targetLanguag
 }
 
 app.get('/api/health', (req, res) => {
-  res.json({ 
-    status: 'OK', 
-    timestamp: new Date().toISOString(),
-    activeConnections: activeConnections.size,
-    totalClients: io.engine.clientsCount
-  })
+  try {
+    res.status(200).json({ 
+      status: 'OK', 
+      timestamp: new Date().toISOString(),
+      uptime: process.uptime(),
+      memory: process.memoryUsage(),
+      activeConnections: activeConnections.size,
+      totalClients: io.engine.clientsCount
+    })
+  } catch (error) {
+    console.error('Health check error:', error);
+    res.status(500).json({ 
+      status: 'ERROR', 
+      error: error.message,
+      timestamp: new Date().toISOString()
+    })
+  }
 })
 
 app.get('/api/languages', authenticateToken, (req, res) => {
@@ -502,8 +551,6 @@ const startServer = async () => {
     // Start server
     server.listen(config.PORT, config.HOST, () => {
       console.log(`🚀 Server running on ${config.HOST}:${config.PORT}`)
-      console.log(`🎤 Input Client: http://localhost:5173`)
-      console.log(`🌍 Translation Client: http://localhost:5174`)
     })
   } catch (error) {
     console.error('Failed to start server:', error)
@@ -511,11 +558,21 @@ const startServer = async () => {
   }
 }
 
-startServer()
-
+// Graceful shutdown handlers
 process.on('SIGTERM', () => {
-  console.log('SIGTERM received, shutting down gracefully')
+  console.log('🛑 Received SIGTERM, shutting down gracefully...');
   server.close(() => {
-    console.log('Process terminated')
-  })
-})
+    console.log('✅ Server closed');
+    process.exit(0);
+  });
+});
+
+process.on('SIGINT', () => {
+  console.log('🛑 Received SIGINT, shutting down gracefully...');
+  server.close(() => {
+    console.log('✅ Server closed');
+    process.exit(0);
+  });
+});
+
+startServer()
