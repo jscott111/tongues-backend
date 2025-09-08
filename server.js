@@ -432,7 +432,7 @@ app.post('/api/sessions', authenticateToken, async (req, res) => {
       }
       res.json({ sessionId, message: 'Session found and associated' })
     } else {
-      session = await Session.create(sessionId, userId, 24)
+      session = await Session.create(sessionId, userId)
       res.json({ sessionId, message: 'Session created' })
     }
   } catch (error) {
@@ -450,24 +450,9 @@ app.use((req, res) => {
   res.status(404).json({ error: 'Route not found' })
 })
 
-const cleanupExpiredSessions = async () => {
-  try {
-    const cleanedCount = await Session.cleanupExpired()
-    if (cleanedCount > 0) {
-      console.log(`🧹 Cleaned up ${cleanedCount} expired sessions`)
-    }
-  } catch (error) {
-    console.error('Error cleaning up sessions:', error)
-  }
-}
-
-setInterval(cleanupExpiredSessions, 60 * 60 * 1000)
-
 const startServer = async () => {
   try {
     await initDatabase()
-    
-    await cleanupExpiredSessions()
     
     server.listen(config.PORT, config.HOST, () => {
       console.log(`🚀 Server running on ${config.HOST}:${config.PORT}`)

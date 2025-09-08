@@ -5,18 +5,15 @@ class Session {
     this.id = data.id;
     this.userId = data.user_id;
     this.createdAt = data.created_at;
-    this.expiresAt = data.expires_at;
     this.isActive = data.is_active;
     this.characterCount = data.character_count;
   }
 
-  static async create(sessionId, userId = null, expiresInHours = 24) {
+  static async create(sessionId, userId = null) {
     try {
-      const expiresAt = new Date(Date.now() + expiresInHours * 60 * 60 * 1000);
-      
       const result = await runQuery(
-        `INSERT INTO sessions (id, user_id, expires_at) VALUES ($1, $2, $3) RETURNING *`,
-        [sessionId, userId, expiresAt]
+        `INSERT INTO sessions (id, user_id) VALUES ($1, $2) RETURNING *`,
+        [sessionId, userId]
       );
 
       return new Session(result);
@@ -29,7 +26,7 @@ class Session {
   static async findById(sessionId) {
     try {
       const session = await getQuery(
-        `SELECT * FROM sessions WHERE id = $1 AND is_active = true AND expires_at > NOW()`,
+        `SELECT * FROM sessions WHERE id = $1 AND is_active = true`,
         [sessionId]
       );
 
@@ -43,7 +40,7 @@ class Session {
   static async findByUserId(userId) {
     try {
       const sessions = await allQuery(
-        `SELECT * FROM sessions WHERE user_id = $1 AND is_active = true AND expires_at > NOW() ORDER BY created_at DESC`,
+        `SELECT * FROM sessions WHERE user_id = $1 AND is_active = true ORDER BY created_at DESC`,
         [userId]
       );
 
@@ -51,19 +48,6 @@ class Session {
     } catch (error) {
       console.error('Error finding sessions by user:', error);
       throw error;
-    }
-  }
-
-  static async updateLastActivity(sessionId) {
-    try {
-      await runQuery(
-        `UPDATE sessions SET expires_at = $1 WHERE id = $2`,
-        [new Date(Date.now() + 24 * 60 * 60 * 1000), sessionId] // Extend by 24 hours
-      );
-      return true;
-    } catch (error) {
-      console.error('Error updating session activity:', error);
-      return false;
     }
   }
   
@@ -93,24 +77,10 @@ class Session {
     }
   }
 
-  static async cleanupExpired() {
-    try {
-      const result = await runQuery(
-        `UPDATE sessions SET is_active = false WHERE expires_at <= NOW() AND is_active = true`,
-        []
-      );
-      console.log(`🧹 Cleaned up ${result.rowCount} expired sessions`);
-      return result.rowCount;
-    } catch (error) {
-      console.error('Error cleaning up expired sessions:', error);
-      return 0;
-    }
-  }
-
   static async getActiveSessionCount() {
     try {
       const result = await getQuery(
-        `SELECT COUNT(*) as count FROM sessions WHERE is_active = true AND expires_at > NOW()`,
+        `SELECT COUNT(*) as count FROM sessions WHERE is_active = true`,
         []
       );
       return parseInt(result.count);

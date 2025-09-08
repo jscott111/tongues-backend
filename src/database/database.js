@@ -108,6 +108,13 @@ const runMigrations = async () => {
       sql:`
         ALTER TABLE sessions ADD COLUMN character_count INTEGER DEFAULT 0;
       `
+    },
+    {
+      filename: '20250109000000_remove_expires_at_column.sql',
+      sql: `
+        ALTER TABLE sessions DROP COLUMN IF EXISTS expires_at;
+        DROP INDEX IF EXISTS idx_sessions_expires_at;
+      `
     }
   ];
 
