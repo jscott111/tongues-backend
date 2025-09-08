@@ -4,31 +4,13 @@ const socketIo = require('socket.io')
 const cors = require('cors')
 const path = require('path')
 require('dotenv').config()
-
 const config = require('./config')
-const { getSupportedLanguages } = require('./azureLangs')
+const { getSupportedLanguages } = require('./config/azureLangs')
 const { authenticateToken, authenticateSocket } = require('./middleware/auth')
 const authRoutes = require('./routes/auth')
-
-// Debug: Log environment variables
-console.log('🔍 Environment variables debug:');
-console.log('  NODE_ENV:', process.env.NODE_ENV);
-console.log('  DB_HOST:', process.env.DB_HOST);
-console.log('  DB_NAME:', process.env.DB_NAME);
-console.log('  DB_USER:', process.env.DB_USER);
-console.log('  DB_PASSWORD:', process.env.DB_PASSWORD ? '[SET]' : '[NOT SET]');
-console.log('  All DB_ variables:', Object.keys(process.env).filter(key => key.startsWith('DB_')));
-
-// Import PostgreSQL database module
-const { initDatabase } = require('./config/database-postgres');
-
+const { initDatabase } = require('./config/database-postgres')
 const app = express()
 const server = http.createServer(app)
-
-// Debug CORS configuration
-console.log('🔍 CORS Configuration Debug:');
-console.log('  CORS_ORIGIN:', config.CORS_ORIGIN);
-console.log('  Split origins:', config.CORS_ORIGIN.split(','));
 
 app.use(cors({
   origin: config.CORS_ORIGIN.split(',').map(origin => origin.trim()),
@@ -40,7 +22,7 @@ app.use(cors({
 
 const io = socketIo(server, {
   cors: {
-    origin: true, // Allow all origins for socket connections
+    origin: true,
     methods: ["GET", "POST", "OPTIONS"],
     credentials: true,
     allowedHeaders: ["Content-Type", "Authorization"],
@@ -50,13 +32,11 @@ const io = socketIo(server, {
   allowEIO3: true
 })
 
-// Socket authentication middleware
 io.use(authenticateSocket)
 
 app.use(express.json({ limit: '50mb' }))
 app.use(express.static(path.join(__dirname, 'public')))
 
-// Authentication routes
 app.use('/api/auth', authRoutes)
 
 const activeConnections = new Map()
@@ -66,12 +46,10 @@ const emitConnectionCount = (sessionId = null) => {
   let totalConnections = 0
   
   activeConnections.forEach((connection) => {
-    // If sessionId is provided, only count connections in that session
     if (sessionId && connection.sessionId !== sessionId) {
       return
     }
     
-    // Only count connections that have a valid session ID
     if (!connection.sessionId) {
       return
     }
@@ -100,7 +78,6 @@ const emitConnectionCount = (sessionId = null) => {
       }
     })
   } else {
-    // Emit to all connections with valid sessions
     const validConnections = Array.from(activeConnections.entries())
       .filter(([_, conn]) => conn.sessionId)
       .map(([socketId, _]) => socketId)
@@ -115,7 +92,7 @@ const emitConnectionCount = (sessionId = null) => {
 }
 
 io.on('connection', (socket) => {
-  console.log(`🔌 Client connected: ${socket.user?.email || 'Anonymous'} (${socket.sessionId || 'No Session'})`)
+  console.log(`🔌 Client connected: ${socket.user?.email || 'Listener'} (${socket.sessionId || 'No Session'})`)
   
   activeConnections.set(socket.id, {
     userId: socket.user?.id,
@@ -127,7 +104,6 @@ io.on('connection', (socket) => {
     needsTokenRefresh: socket.needsTokenRefresh || false
   })
 
-  // Notify client if they need to refresh their token
   if (socket.needsTokenRefresh) {
     socket.emit('tokenExpired', {
       message: 'Your session has expired. Please refresh your token.',
@@ -137,7 +113,6 @@ io.on('connection', (socket) => {
   
   emitConnectionCount(socket.sessionId)
 
-  // Handle token refresh requests
   socket.on('refreshToken', async (data) => {
     try {
       const { refreshToken } = data
@@ -147,7 +122,6 @@ io.on('connection', (socket) => {
         return
       }
 
-      // Verify refresh token
       const jwt = require('jsonwebtoken')
       const JWT_SECRET = process.env.JWT_SECRET || 'your-super-secret-jwt-key-change-this-in-production'
       
@@ -164,16 +138,13 @@ io.on('connection', (socket) => {
             return
           }
 
-          // Generate new tokens
           const { generateToken, generateRefreshToken } = require('./middleware/auth')
           const newAccessToken = generateToken(user)
           const newRefreshToken = generateRefreshToken(user)
 
-          // Update socket user and clear refresh flag
           socket.user = user
           socket.needsTokenRefresh = false
           
-          // Update connection info
           const connection = activeConnections.get(socket.id)
           if (connection) {
             connection.userId = user.id
@@ -200,7 +171,6 @@ io.on('connection', (socket) => {
 
   socket.on('speechTranscription', async (data) => {
     try {
-      // Check if socket needs token refresh
       if (socket.needsTokenRefresh) {
         socket.emit('tokenExpired', {
           message: 'Your session has expired. Please refresh your token.',
@@ -225,13 +195,11 @@ io.on('connection', (socket) => {
           .filter(([_, conn]) => conn.sessionId === currentConnection.sessionId)
           .map(([socketId, _]) => socketId)
         
-        // Find TranslationApp connections (those without userId) and translate for them
         const translationConnections = sessionConnections.filter(socketId => {
           const conn = activeConnections.get(socketId)
           return conn && !conn.userId && conn.targetLanguage
         })
         
-        // Send original transcription to InputApp (authenticated connections)
         sessionConnections.forEach(socketId => {
           const targetSocket = io.sockets.sockets.get(socketId)
           const conn = activeConnections.get(socketId)
@@ -246,7 +214,6 @@ io.on('connection', (socket) => {
           }
         })
         
-        // Translate and send to TranslationApp connections
         if (translationConnections.length > 0) {
           try {
             for (const socketId of translationConnections) {
@@ -269,7 +236,6 @@ io.on('connection', (socket) => {
             }
           } catch (error) {
             console.error('Translation error:', error)
-            // Send error to translation connections
             translationConnections.forEach(socketId => {
               const targetSocket = io.sockets.sockets.get(socketId)
               if (targetSocket) {
@@ -394,14 +360,6 @@ app.get('/api/websocket-status', authenticateToken, (req, res) => {
 
 async function processTranscription(transcription, sourceLanguage, targetLanguage) {
   try {
-    console.log(`🌍 Processing: "${transcription}" (${sourceLanguage} → ${targetLanguage})`)
-    
-    // Debug: Log Azure configuration
-    console.log('🔍 Azure Translator Config Debug:');
-    console.log('  Endpoint:', config.AZURE_TRANSLATOR_ENDPOINT);
-    console.log('  Key:', config.AZURE_TRANSLATOR_KEY ? '[SET]' : '[NOT SET]');
-    console.log('  Region:', config.AZURE_TRANSLATOR_REGION);
-    
     const createClient = require('@azure-rest/ai-translation-text').default
     
     const client = createClient(config.AZURE_TRANSLATOR_ENDPOINT, {
@@ -423,15 +381,8 @@ async function processTranscription(transcription, sourceLanguage, targetLanguag
       }
     })
     
-    // Debug: Log the full response
-    console.log('🔍 Azure Translator Response Debug:');
-    console.log('  Status:', result.status);
-    console.log('  Headers:', result.headers);
-    console.log('  Body:', JSON.stringify(result.body, null, 2));
-    
     if (result.body && result.body[0] && result.body[0].translations && result.body[0].translations[0]) {
       const translatedText = result.body[0].translations[0].text
-      console.log(`✅ Translated: "${transcription}" → "${translatedText}"`)
       return translatedText
     } else {
       console.error('❌ Invalid response structure:', {
@@ -471,12 +422,6 @@ app.get('/api/health', (req, res) => {
   }
 })
 
-app.get('/api/languages', authenticateToken, (req, res) => {
-  const languages = getSupportedLanguages()
-  res.json(languages)
-})
-
-// Authenticated translation endpoint
 app.post('/api/translate', authenticateToken, async (req, res) => {
   try {
     const { text, from, to } = req.body
@@ -502,7 +447,6 @@ app.post('/api/translate', authenticateToken, async (req, res) => {
   }
 })
 
-// Session-based translation endpoint for TranslationApp
 app.post('/api/translate/session', async (req, res) => {
   try {
     const { text, from, to, sessionId } = req.body
@@ -511,12 +455,10 @@ app.post('/api/translate/session', async (req, res) => {
       return res.status(400).json({ error: 'Missing required fields: text, from, to, sessionId' })
     }
 
-    // Validate session ID format
     if (!/^[A-Z0-9]{8}$/.test(sessionId)) {
       return res.status(400).json({ error: 'Invalid session ID format' })
     }
 
-    console.log(`🌍 Session ${sessionId} translating: "${text}" (${from} → ${to})`)
     const translatedText = await processTranscription(text, from, to)
     
     res.json({
@@ -542,13 +484,10 @@ app.use((req, res) => {
   res.status(404).json({ error: 'Route not found' })
 })
 
-// Initialize database and start server
 const startServer = async () => {
   try {
-    // Initialize database
     await initDatabase()
     
-    // Start server
     server.listen(config.PORT, config.HOST, () => {
       console.log(`🚀 Server running on ${config.HOST}:${config.PORT}`)
     })
@@ -558,7 +497,6 @@ const startServer = async () => {
   }
 }
 
-// Graceful shutdown handlers
 process.on('SIGTERM', () => {
   console.log('🛑 Received SIGTERM, shutting down gracefully...');
   server.close(() => {
