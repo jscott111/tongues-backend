@@ -7,8 +7,8 @@ module.exports = {
   DB_TYPE: 'postgres',
   DB_HOST: process.env.DB_HOST || 'localhost',
   DB_PORT: process.env.DB_PORT || 5432,
-  DB_NAME: process.env.DB_NAME || 'scribe_dev',
-  DB_USER: process.env.DB_USER || 'postgres',
+  DB_NAME: process.env.DB_NAME || 'scribe-dev',
+  DB_USER: process.env.DB_USER || 'johnascott',
   DB_PASSWORD: process.env.DB_PASSWORD || 'password',
   DB_SSL: process.env.DB_SSL || 'false',
   

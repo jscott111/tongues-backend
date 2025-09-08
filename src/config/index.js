@@ -1,0 +1,43 @@
+const environment = process.env.NODE_ENV || 'dev';
+let config;
+try {
+  config = require(`./environments/${environment}`);
+} catch (error) {
+  console.warn(`No configuration found for environment: ${environment}, falling back to dev`);
+  config = require('./environments/dev');
+}
+
+const finalConfig = {
+  ...config,
+  NODE_ENV: process.env.NODE_ENV || config.NODE_ENV,
+  PORT: process.env.PORT || config.PORT,
+  HOST: process.env.HOST || config.HOST,
+  DB_TYPE: process.env.DB_TYPE || config.DB_TYPE,
+  DB_PATH: process.env.DB_PATH || config.DB_PATH,
+  DB_HOST: process.env.DB_HOST || config.DB_HOST,
+  DB_PORT: process.env.DB_PORT || config.DB_PORT,
+  DB_NAME: process.env.DB_NAME || config.DB_NAME,
+  DB_USER: process.env.DB_USER || config.DB_USER,
+  DB_PASSWORD: process.env.DB_PASSWORD || config.DB_PASSWORD,
+  DB_SSL: process.env.DB_SSL || config.DB_SSL,
+  JWT_SECRET: process.env.JWT_SECRET || config.JWT_SECRET,
+  JWT_ACCESS_EXPIRES_IN: process.env.JWT_ACCESS_EXPIRES_IN || config.JWT_ACCESS_EXPIRES_IN,
+  JWT_REFRESH_EXPIRES_IN: process.env.JWT_REFRESH_EXPIRES_IN || config.JWT_REFRESH_EXPIRES_IN,
+  AZURE_TRANSLATOR_KEY: process.env.AZURE_TRANSLATOR_KEY || config.AZURE_TRANSLATOR_KEY,
+  AZURE_TRANSLATOR_REGION: process.env.AZURE_TRANSLATOR_REGION || config.AZURE_TRANSLATOR_REGION,
+  AZURE_TRANSLATOR_ENDPOINT: process.env.AZURE_TRANSLATOR_ENDPOINT || config.AZURE_TRANSLATOR_ENDPOINT,
+  CORS_ORIGIN: process.env.CORS_ORIGIN || config.CORS_ORIGIN,
+  LOG_LEVEL: process.env.LOG_LEVEL || config.LOG_LEVEL
+};
+
+if (environment === 'prod') {
+  const requiredVars = ['JWT_SECRET', 'AZURE_TRANSLATOR_KEY', 'AZURE_TRANSLATOR_REGION', 'CORS_ORIGIN'];
+  const missingVars = requiredVars.filter(varName => !finalConfig[varName]);
+  
+  if (missingVars.length > 0) {
+    console.error(`Missing required environment variables for production: ${missingVars.join(', ')}`);
+    process.exit(1);
+  }
+}
+
+module.exports = finalConfig;

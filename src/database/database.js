@@ -1,22 +1,11 @@
 const { Pool } = require('pg');
-const config = require('./index');
+const config = require('../config');
 
 let pool;
 
 const initDatabase = () => {
   return new Promise((resolve, reject) => {
     try {
-      // Debug: Log database configuration
-      console.log('🔍 Database configuration debug:');
-      console.log('  DB_HOST:', config.DB_HOST);
-      console.log('  DB_PORT:', config.DB_PORT);
-      console.log('  DB_NAME:', config.DB_NAME);
-      console.log('  DB_USER:', config.DB_USER);
-      console.log('  DB_PASSWORD:', config.DB_PASSWORD ? '[SET]' : '[NOT SET]');
-      console.log('  DB_SSL:', config.DB_SSL);
-      console.log('  Connection string:', `postgresql://${config.DB_USER}@${config.DB_HOST}:${config.DB_PORT}/${config.DB_NAME}`);
-      
-      // Validate required fields
       if (!config.DB_HOST) {
         console.error('❌ DB_HOST is not set');
         console.error('Available environment variables:', Object.keys(process.env).filter(key => key.startsWith('DB_')));
@@ -35,7 +24,6 @@ const initDatabase = () => {
         return reject(new Error('DB_PASSWORD environment variable is required'));
       }
 
-      // Create connection pool
       pool = new Pool({
         host: config.DB_HOST,
         port: config.DB_PORT,
@@ -43,12 +31,11 @@ const initDatabase = () => {
         user: config.DB_USER,
         password: config.DB_PASSWORD,
         ssl: config.DB_SSL === 'true' ? { rejectUnauthorized: false } : false,
-        max: 20, // Maximum number of clients in the pool
-        idleTimeoutMillis: 30000, // Close idle clients after 30 seconds
-        connectionTimeoutMillis: 10000, // Return an error after 10 seconds if connection could not be established
+        max: 20,
+        idleTimeoutMillis: 30000,
+        connectionTimeoutMillis: 10000,
       });
 
-      // Test the connection with a simple query
       pool.query('SELECT 1', (err, result) => {
         if (err) {
           console.error('❌ Database connection failed:', err.message);
@@ -57,7 +44,6 @@ const initDatabase = () => {
         
         console.log('✅ Connected to PostgreSQL database');
         
-        // Run migrations
         runMigrations()
           .then(() => {
             console.log('✅ Database migrations completed');
@@ -73,7 +59,6 @@ const initDatabase = () => {
 };
 
 const runMigrations = async () => {
-  // Create migrations table to track applied migrations
   await pool.query(`
     CREATE TABLE IF NOT EXISTS migrations (
       id SERIAL PRIMARY KEY,
@@ -122,7 +107,6 @@ const runMigrations = async () => {
 
   for (const migration of migrations) {
     try {
-      // Check if migration already applied
       const result = await pool.query('SELECT id FROM migrations WHERE filename = $1', [migration.filename]);
       
       if (result.rows.length > 0) {
@@ -130,10 +114,8 @@ const runMigrations = async () => {
         continue;
       }
 
-      // Apply migration
       await pool.query(migration.sql);
       
-      // Record migration as applied
       await pool.query('INSERT INTO migrations (filename) VALUES ($1)', [migration.filename]);
       
       console.log(`✅ Migration ${migration.filename} completed`);

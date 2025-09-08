@@ -12,10 +12,9 @@
  *   node migrate.js --rollback         # Rollback last migration (not implemented yet)
  */
 
-const config = require('./config');
+const config = require('../../config');
 
-// Import PostgreSQL database module
-const { initDatabase } = require('./config/database-postgres');
+const { initDatabase } = require('../database');
 
 async function runMigrations() {
   try {

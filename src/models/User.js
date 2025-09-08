@@ -1,5 +1,5 @@
 const bcrypt = require('bcrypt');
-const { runQuery, getQuery, allQuery } = require('../config/database-postgres');
+const { runQuery, getQuery, allQuery } = require('../database/database');
 
 class User {
   constructor(data) {

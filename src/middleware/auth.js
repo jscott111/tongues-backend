@@ -1,8 +1,8 @@
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
+const Session = require('../models/Session');
 const config = require('../config');
 
-// JWT configuration from environment
 const JWT_SECRET = config.JWT_SECRET;
 
 /**
@@ -10,7 +10,7 @@ const JWT_SECRET = config.JWT_SECRET;
  */
 const authenticateToken = (req, res, next) => {
   const authHeader = req.headers['authorization'];
-  const token = authHeader && authHeader.split(' ')[1]; // Bearer TOKEN
+  const token = authHeader && authHeader.split(' ')[1];
 
   if (!token) {
     return res.status(401).json({ 
@@ -29,7 +29,6 @@ const authenticateToken = (req, res, next) => {
     }
 
     try {
-      // Verify user still exists and is active
       const user = await User.findUserById(decoded.userId);
       if (!user || !user.isActive) {
         return res.status(403).json({ 
@@ -54,24 +53,35 @@ const authenticateToken = (req, res, next) => {
  * Middleware to authenticate WebSocket connections
  * Supports both JWT authentication and session-based connections
  */
-const authenticateSocket = (socket, next) => {
+const authenticateSocket = async (socket, next) => {
   const token = socket.handshake.auth.token || socket.handshake.headers.authorization?.split(' ')[1];
   const sessionId = socket.handshake.auth.sessionId;
 
-  // If session ID is provided, validate it first
   if (sessionId) {
     if (!/^[A-Z0-9]{8}$/.test(sessionId)) {
       console.log(`❌ Invalid session ID format: ${sessionId}`);
       return next(new Error('Invalid session ID format'));
     }
-    socket.sessionId = sessionId;
+    
+    try {
+      const session = await Session.findById(sessionId);
+      if (!session) {
+        console.log(`❌ Session not found or expired: ${sessionId}`);
+        return next(new Error('Session not found or expired'));
+      }
+      
+      await Session.updateLastActivity(sessionId);
+      socket.sessionId = sessionId;
+      socket.sessionUserId = session.userId;
+    } catch (error) {
+      console.error('Error validating session:', error);
+      return next(new Error('Session validation failed'));
+    }
   }
 
-  // If token is provided, authenticate the user
   if (token) {
     jwt.verify(token, JWT_SECRET, async (err, decoded) => {
       if (err) {
-        // If token is expired, allow connection but mark as needing refresh
         if (err.name === 'TokenExpiredError') {
           console.log('🔄 Token expired, allowing connection with session-only mode');
           socket.user = null;
@@ -98,12 +108,10 @@ const authenticateSocket = (socket, next) => {
       }
     });
   } else if (sessionId) {
-    // Session-only connection (TranslationApp)
     socket.user = null;
     socket.needsTokenRefresh = false;
     next();
   } else {
-    // No token and no session ID
     return next(new Error('Authentication token or session ID required'));
   }
 };
