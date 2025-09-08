@@ -37,7 +37,7 @@ io.use(authenticateSocket)
 app.use(express.json({ limit: '50mb' }))
 app.use(express.static(path.join(__dirname, 'public')))
 
-app.use('/api/auth', authRoutes)
+app.use('/auth', authRoutes)
 
 const activeConnections = new Map()
 
@@ -221,6 +221,7 @@ io.on('connection', (socket) => {
               if (conn?.targetLanguage) {
                 const characterCount = transcription.length
                 await Session.updateCharacterCount(characterCount, currentConnection.sessionId)
+                await Session.updateLastActivity(currentConnection.sessionId)
 
                 const translatedText = await processTranscription(transcription, sourceLanguage, conn.targetLanguage)
                 
@@ -392,7 +393,7 @@ async function processTranscription(transcription, sourceLanguage, targetLanguag
   }
 }
 
-app.get('/api/health', (req, res) => {
+app.get('/health', (req, res) => {
   try {
     res.status(200).json({ 
       status: 'OK', 
@@ -412,7 +413,7 @@ app.get('/api/health', (req, res) => {
   }
 })
 
-app.post('/api/sessions', authenticateToken, async (req, res) => {
+app.post('/sessions', authenticateToken, async (req, res) => {
   try {
     const { sessionId } = req.body
     const userId = req.user.id

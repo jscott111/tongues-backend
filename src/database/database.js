@@ -115,6 +115,14 @@ const runMigrations = async () => {
         ALTER TABLE sessions DROP COLUMN IF EXISTS expires_at;
         DROP INDEX IF EXISTS idx_sessions_expires_at;
       `
+    },
+    {
+      filename: '20250109000001_add_last_activity_to_sessions.sql',
+      sql: `
+        ALTER TABLE sessions ADD COLUMN last_activity TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
+        CREATE INDEX IF NOT EXISTS idx_sessions_last_activity ON sessions(last_activity);
+        UPDATE sessions SET last_activity = created_at WHERE last_activity IS NULL;
+      `
     }
   ];
 

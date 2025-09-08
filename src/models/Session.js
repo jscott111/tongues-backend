@@ -5,6 +5,7 @@ class Session {
     this.id = data.id;
     this.userId = data.user_id;
     this.createdAt = data.created_at;
+    this.lastActivity = data.last_activity;
     this.isActive = data.is_active;
     this.characterCount = data.character_count;
   }
@@ -48,6 +49,19 @@ class Session {
     } catch (error) {
       console.error('Error finding sessions by user:', error);
       throw error;
+    }
+  }
+
+  static async updateLastActivity(sessionId) {
+    try {
+      await runQuery(
+        `UPDATE sessions SET last_activity = NOW() WHERE id = $1`,
+        [sessionId]
+      );
+      return true;
+    } catch (error) {
+      console.error('Error updating last activity:', error);
+      return false;
     }
   }
   
