@@ -7,6 +7,7 @@ class Session {
     this.createdAt = data.created_at;
     this.expiresAt = data.expires_at;
     this.isActive = data.is_active;
+    this.characterCount = data.character_count;
   }
 
   static async create(sessionId, userId = null, expiresInHours = 24) {
@@ -62,6 +63,19 @@ class Session {
       return true;
     } catch (error) {
       console.error('Error updating session activity:', error);
+      return false;
+    }
+  }
+  
+  static async updateCharacterCount(characterCount, sessionId) {
+    try {
+      await runQuery(
+        `UPDATE sessions SET character_count = character_count + $1 WHERE id = $2`,
+        [characterCount, sessionId]
+      );
+      return true;
+    } catch (error) {
+      console.error('Error updating character count:', error);
       return false;
     }
   }

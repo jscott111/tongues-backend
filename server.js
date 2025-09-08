@@ -219,7 +219,11 @@ io.on('connection', (socket) => {
             for (const socketId of translationConnections) {
               const conn = activeConnections.get(socketId)
               if (conn?.targetLanguage) {
+                const characterCount = transcription.length
+                await Session.updateCharacterCount(characterCount, currentConnection.sessionId)
+
                 const translatedText = await processTranscription(transcription, sourceLanguage, conn.targetLanguage)
+                
                 const targetSocket = io.sockets.sockets.get(socketId)
                 if (targetSocket) {
                   targetSocket.emit('translationComplete', {
@@ -344,20 +348,6 @@ io.on('connection', (socket) => {
   })
 })
 
-app.get('/api/websocket-status', authenticateToken, (req, res) => {
-  res.json({
-    status: 'OK',
-    timestamp: new Date().toISOString(),
-    activeConnections: activeConnections.size,
-    totalClients: io.engine.clientsCount,
-    websocketEnabled: true,
-    user: {
-      id: req.user.id,
-      email: req.user.email
-    }
-  })
-})
-
 async function processTranscription(transcription, sourceLanguage, targetLanguage) {
   try {
     const createClient = require('@azure-rest/ai-translation-text').default
@@ -422,31 +412,6 @@ app.get('/api/health', (req, res) => {
   }
 })
 
-app.post('/api/translate', authenticateToken, async (req, res) => {
-  try {
-    const { text, from, to } = req.body
-    
-    if (!text || !from || !to) {
-      return res.status(400).json({ error: 'Missing required fields: text, from, to' })
-    }
-
-    console.log(`🌍 User ${req.user.email} translating: "${text}" (${from} → ${to})`)
-    const translatedText = await processTranscription(text, from, to)
-    
-    res.json({
-      translatedText,
-      originalText: text,
-      sourceLanguage: from,
-      targetLanguage: to,
-      userId: req.user.id
-    })
-    
-  } catch (error) {
-    console.error('Translation API error:', error)
-    res.status(500).json({ error: 'Translation failed' })
-  }
-})
-
 app.post('/api/sessions', authenticateToken, async (req, res) => {
   try {
     const { sessionId } = req.body
@@ -473,72 +438,6 @@ app.post('/api/sessions', authenticateToken, async (req, res) => {
   } catch (error) {
     console.error('Session creation error:', error)
     res.status(500).json({ error: 'Failed to create session' })
-  }
-})
-
-app.get('/api/sessions', authenticateToken, async (req, res) => {
-  try {
-    const sessions = await Session.findByUserId(req.user.id)
-    res.json(sessions.map(session => ({
-      id: session.id,
-      createdAt: session.createdAt,
-      expiresAt: session.expiresAt,
-      isActive: session.isActive
-    })))
-  } catch (error) {
-    console.error('Error fetching sessions:', error)
-    res.status(500).json({ error: 'Failed to fetch sessions' })
-  }
-})
-
-app.delete('/api/sessions/:sessionId', authenticateToken, async (req, res) => {
-  try {
-    const { sessionId } = req.params
-    const userId = req.user.id
-    
-    const session = await Session.findById(sessionId)
-    if (!session || session.userId !== userId) {
-      return res.status(404).json({ error: 'Session not found' })
-    }
-    
-    await Session.deactivate(sessionId)
-    res.json({ message: 'Session deactivated' })
-  } catch (error) {
-    console.error('Error deactivating session:', error)
-    res.status(500).json({ error: 'Failed to deactivate session' })
-  }
-})
-
-app.post('/api/translate/session', async (req, res) => {
-  try {
-    const { text, from, to, sessionId } = req.body
-    
-    if (!text || !from || !to || !sessionId) {
-      return res.status(400).json({ error: 'Missing required fields: text, from, to, sessionId' })
-    }
-
-    if (!/^[A-Z0-9]{8}$/.test(sessionId)) {
-      return res.status(400).json({ error: 'Invalid session ID format' })
-    }
-
-    const session = await Session.findById(sessionId)
-    if (!session) {
-      return res.status(404).json({ error: 'Session not found or expired' })
-    }
-
-    const translatedText = await processTranscription(text, from, to)
-    
-    res.json({
-      translatedText,
-      originalText: text,
-      sourceLanguage: from,
-      targetLanguage: to,
-      sessionId
-    })
-    
-  } catch (error) {
-    console.error('Session translation API error:', error)
-    res.status(500).json({ error: 'Translation failed' })
   }
 })
 

@@ -52,8 +52,7 @@ function createMigration(description) {
   console.log('📝 Next steps:');
   console.log('1. Edit the migration file with your SQL statements');
   console.log('2. Add the migration to the migrations array in:');
-  console.log('   - config/database.js (SQLite)');
-  console.log('   - config/database-postgres.js (PostgreSQL)');
+  console.log('   - config/database.js (PostgreSQL)');
   console.log('3. Test the migration locally');
   console.log('4. Deploy to production');
 }

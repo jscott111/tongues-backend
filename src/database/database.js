@@ -102,6 +102,12 @@ const runMigrations = async () => {
         CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);
         CREATE INDEX IF NOT EXISTS idx_sessions_id ON sessions(id);
       `
+    },
+    {
+      filename: '20250908225803_add_character_count_to_sessions.sql',
+      sql:`
+        ALTER TABLE sessions ADD COLUMN character_count INTEGER DEFAULT 0;
+      `
     }
   ];
 
