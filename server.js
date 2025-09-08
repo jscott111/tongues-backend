@@ -449,7 +449,73 @@ app.post('/sessions', authenticateToken, async (req, res) => {
   }
 })
 
+<<<<<<< HEAD
 app.get('/sessions/:sessionId/validate', async (req, res) => {
+=======
+app.post('/api/sessions', authenticateToken, async (req, res) => {
+  try {
+    const { sessionId } = req.body
+    const userId = req.user.id
+    
+    if (!sessionId || !/^[A-Z0-9]{8}$/.test(sessionId)) {
+      return res.status(400).json({ error: 'Valid session ID required' })
+    }
+    
+    let session = await Session.findById(sessionId)
+    
+    if (session) {
+      if (!session.userId) {
+        await runQuery(
+          `UPDATE sessions SET user_id = $1 WHERE id = $2`,
+          [userId, sessionId]
+        )
+      }
+      res.json({ sessionId, message: 'Session found and associated' })
+    } else {
+      session = await Session.create(sessionId, userId, 24)
+      res.json({ sessionId, message: 'Session created' })
+    }
+  } catch (error) {
+    console.error('Session creation error:', error)
+    res.status(500).json({ error: 'Failed to create session' })
+  }
+})
+
+app.get('/api/sessions', authenticateToken, async (req, res) => {
+  try {
+    const sessions = await Session.findByUserId(req.user.id)
+    res.json(sessions.map(session => ({
+      id: session.id,
+      createdAt: session.createdAt,
+      expiresAt: session.expiresAt,
+      isActive: session.isActive
+    })))
+  } catch (error) {
+    console.error('Error fetching sessions:', error)
+    res.status(500).json({ error: 'Failed to fetch sessions' })
+  }
+})
+
+app.delete('/api/sessions/:sessionId', authenticateToken, async (req, res) => {
+  try {
+    const { sessionId } = req.params
+    const userId = req.user.id
+    
+    const session = await Session.findById(sessionId)
+    if (!session || session.userId !== userId) {
+      return res.status(404).json({ error: 'Session not found' })
+    }
+    
+    await Session.deactivate(sessionId)
+    res.json({ message: 'Session deactivated' })
+  } catch (error) {
+    console.error('Error deactivating session:', error)
+    res.status(500).json({ error: 'Failed to deactivate session' })
+  }
+})
+
+app.post('/api/translate/session', async (req, res) => {
+>>>>>>> 89d4e2d (Made sessions persistent and refactored)
   try {
     const { sessionId } = req.params
     
@@ -474,6 +540,25 @@ app.get('/sessions/:sessionId/validate', async (req, res) => {
         error: 'Session not found or inactive' 
       })
     }
+<<<<<<< HEAD
+=======
+
+    const session = await Session.findById(sessionId)
+    if (!session) {
+      return res.status(404).json({ error: 'Session not found or expired' })
+    }
+
+    const translatedText = await processTranscription(text, from, to)
+    
+    res.json({
+      translatedText,
+      originalText: text,
+      sourceLanguage: from,
+      targetLanguage: to,
+      sessionId
+    })
+    
+>>>>>>> 89d4e2d (Made sessions persistent and refactored)
   } catch (error) {
     console.error('Session validation error:', error)
     res.status(500).json({ 
@@ -492,9 +577,24 @@ app.use((req, res) => {
   res.status(404).json({ error: 'Route not found' })
 })
 
+const cleanupExpiredSessions = async () => {
+  try {
+    const cleanedCount = await Session.cleanupExpired()
+    if (cleanedCount > 0) {
+      console.log(`🧹 Cleaned up ${cleanedCount} expired sessions`)
+    }
+  } catch (error) {
+    console.error('Error cleaning up sessions:', error)
+  }
+}
+
+setInterval(cleanupExpiredSessions, 60 * 60 * 1000)
+
 const startServer = async () => {
   try {
     await initDatabase()
+    
+    await cleanupExpiredSessions()
     
     server.listen(config.PORT, config.HOST, () => {
       console.log(`🚀 Server running on ${config.HOST}:${config.PORT}`)
