@@ -442,6 +442,40 @@ app.post('/sessions', authenticateToken, async (req, res) => {
   }
 })
 
+app.get('/sessions/:sessionId/validate', async (req, res) => {
+  try {
+    const { sessionId } = req.params
+    
+    if (!sessionId || !/^[A-Z0-9]{8}$/.test(sessionId)) {
+      return res.status(400).json({ 
+        valid: false, 
+        error: 'Invalid session ID format' 
+      })
+    }
+    
+    const session = await Session.findById(sessionId)
+    
+    if (session) {
+      res.json({ 
+        valid: true, 
+        sessionId,
+        message: 'Session is valid and active' 
+      })
+    } else {
+      res.json({ 
+        valid: false, 
+        error: 'Session not found or inactive' 
+      })
+    }
+  } catch (error) {
+    console.error('Session validation error:', error)
+    res.status(500).json({ 
+      valid: false, 
+      error: 'Failed to validate session' 
+    })
+  }
+})
+
 app.use((err, req, res, next) => {
   console.error(err.stack)
   res.status(500).json({ error: 'Something went wrong!' })
