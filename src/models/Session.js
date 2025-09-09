@@ -91,6 +91,19 @@ class Session {
     }
   }
 
+  static async deactivateAllForUser(userId) {
+    try {
+      await runQuery(
+        `UPDATE sessions SET is_active = false WHERE user_id = $1 AND is_active = true`,
+        [userId]
+      );
+      return true;
+    } catch (error) {
+      console.error('Error deactivating sessions for user:', error);
+      return false;
+    }
+  }
+
   static async getActiveSessionCount() {
     try {
       const result = await getQuery(
@@ -101,6 +114,19 @@ class Session {
     } catch (error) {
       console.error('Error getting active session count:', error);
       return 0;
+    }
+  }
+
+  static async getActiveSessionsForUser(userId) {
+    try {
+      const sessions = await getQuery(
+        `SELECT * FROM sessions WHERE user_id = $1 AND is_active = true ORDER BY created_at DESC`,
+        [userId]
+      );
+      return sessions.map(session => new Session(session));
+    } catch (error) {
+      console.error('Error getting active sessions for user:', error);
+      return [];
     }
   }
 }

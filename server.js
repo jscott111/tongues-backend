@@ -422,13 +422,22 @@ app.post('/sessions', authenticateToken, async (req, res) => {
       return res.status(400).json({ error: 'Valid session ID required' })
     }
     
+    // Deactivate all previous sessions for this user
+    await Session.deactivateAllForUser(userId)
+    
     let session = await Session.findById(sessionId)
     
     if (session) {
       if (!session.userId) {
         await runQuery(
-          `UPDATE sessions SET user_id = $1 WHERE id = $2`,
+          `UPDATE sessions SET user_id = $1, is_active = true WHERE id = $2`,
           [userId, sessionId]
+        )
+      } else {
+        // Reactivate the session if it was previously deactivated
+        await runQuery(
+          `UPDATE sessions SET is_active = true WHERE id = $1`,
+          [sessionId]
         )
       }
       res.json({ sessionId, message: 'Session found and associated' })
