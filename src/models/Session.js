@@ -104,6 +104,19 @@ class Session {
     }
   }
 
+  static async deactivateAllForUserExcept(userId, exceptSessionId) {
+    try {
+      await runQuery(
+        `UPDATE sessions SET is_active = false WHERE user_id = $1 AND is_active = true AND id != $2`,
+        [userId, exceptSessionId]
+      );
+      return true;
+    } catch (error) {
+      console.error('Error deactivating sessions for user except current:', error);
+      return false;
+    }
+  }
+
   static async getActiveSessionCount() {
     try {
       const result = await getQuery(
