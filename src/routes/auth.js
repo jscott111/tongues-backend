@@ -1,5 +1,8 @@
 const express = require('express');
 const { body, validationResult } = require('express-validator');
+const speakeasy = require('speakeasy');
+const QRCode = require('qrcode');
+const CryptoJS = require('crypto-js');
 const User = require('../models/User');
 const { generateToken, generateRefreshToken, authenticateToken } = require('../middleware/auth');
 
@@ -11,10 +14,8 @@ const validateRegistration = [
     .normalizeEmail()
     .withMessage('Please provide a valid email address'),
   body('password')
-    .isLength({ min: 8 })
-    .withMessage('Password must be at least 8 characters long')
-    .matches(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/)
-    .withMessage('Password must contain at least one lowercase letter, one uppercase letter, and one number'),
+    .isLength({ min: 6 })
+    .withMessage('Password must be at least 6 characters long'),
   body('name')
     .trim()
     .isLength({ min: 2, max: 50 })
@@ -56,7 +57,14 @@ router.post('/register', validateRegistration, async (req, res) => {
       });
     }
 
-    const user = await User.create(name, email, password);
+    const salt = CryptoJS.lib.WordArray.random(32).toString();
+    const hashedPassword = CryptoJS.PBKDF2(password, salt, {
+      keySize: 256 / 32,
+      iterations: 10000
+    }).toString();
+    
+    const finalPasswordHash = `${hashedPassword}:${salt}`;
+    const user = await User.create(name, email, finalPasswordHash);
 
     const accessToken = generateToken(user);
     const refreshToken = generateRefreshToken(user);
@@ -109,12 +117,31 @@ router.post('/login', validateLogin, async (req, res) => {
       });
     }
 
-    const isValidPassword = await user.comparePassword(password);
-    if (!isValidPassword) {
-      return res.status(401).json({
-        error: 'Invalid credentials',
-        code: 'INVALID_CREDENTIALS'
-      });
+      if (user.passwordHash.includes(':')) {
+        const [storedHash, storedSalt] = user.passwordHash.split(':');
+        
+        const providedHash = CryptoJS.PBKDF2(password, storedSalt, {
+          keySize: 256 / 32,
+          iterations: 10000
+        }).toString();
+      
+        
+        const isValidPassword = (providedHash === storedHash);
+      
+      if (!isValidPassword) {
+        return res.status(401).json({
+          error: 'Invalid credentials',
+          code: 'INVALID_CREDENTIALS'
+        });
+      }
+    } else {
+      const isValidPassword = await bcrypt.compare(password, user.passwordHash);
+      if (!isValidPassword) {
+        return res.status(401).json({
+          error: 'Invalid credentials',
+          code: 'INVALID_CREDENTIALS'
+        });
+      }
     }
 
     const accessToken = generateToken(user);
@@ -219,5 +246,337 @@ router.get('/me', authenticateToken, (req, res) => {
 });
 
 
+/**
+ * @route   POST /api/auth/forgot-password-totp
+ * @desc    Initiate TOTP-based password reset
+ * @access  Public
+ */
+router.post('/forgot-password-totp', async (req, res) => {
+  try {
+    const { email } = req.body;
+
+    if (!email) {
+      return res.status(400).json({
+        error: 'Email is required',
+        code: 'MISSING_EMAIL'
+      });
+    }
+
+    // Check if user exists and has TOTP enabled
+    const user = await User.findUserByEmail(email);
+    if (!user) {
+      return res.status(404).json({
+        error: 'User not found',
+        code: 'USER_NOT_FOUND'
+      });
+    }
+
+    // Check if user has TOTP enabled
+    if (!user.totpSecret) {
+      return res.status(400).json({
+        error: 'TOTP not enabled for this account',
+        code: 'TOTP_NOT_ENABLED',
+        message: 'Please enable two-factor authentication in your profile first'
+      });
+    }
+
+    // Store the session temporarily for password reset
+    if (!global.totpSecrets) {
+      global.totpSecrets = new Map();
+    }
+    global.totpSecrets.set(email, {
+      secret: user.totpSecret,
+      expires: Date.now() + 10 * 60 * 1000 // 10 minutes
+    });
+
+    res.json({
+      message: 'TOTP verification initiated'
+    });
+
+  } catch (error) {
+    console.error('TOTP forgot password error:', error.message);
+    res.status(500).json({
+      error: 'Failed to initiate TOTP password reset',
+      message: error.message
+    });
+  }
+});
+
+/**
+ * @route   POST /api/auth/verify-totp
+ * @desc    Verify TOTP code for password reset
+ * @access  Public
+ */
+router.post('/verify-totp', async (req, res) => {
+  try {
+    const { email, totpCode } = req.body;
+
+    if (!email || !totpCode) {
+      return res.status(400).json({
+        error: 'Email and TOTP code are required',
+        code: 'MISSING_FIELDS'
+      });
+    }
+
+    // Get stored secret
+    if (!global.totpSecrets || !global.totpSecrets.has(email)) {
+      return res.status(400).json({
+        error: 'TOTP session expired or not found',
+        code: 'SESSION_EXPIRED'
+      });
+    }
+
+    const totpData = global.totpSecrets.get(email);
+    
+    // Check if session expired
+    if (Date.now() > totpData.expires) {
+      global.totpSecrets.delete(email);
+      return res.status(400).json({
+        error: 'TOTP session expired',
+        code: 'SESSION_EXPIRED'
+      });
+    }
+
+    // Verify TOTP code
+    const verified = speakeasy.totp.verify({
+      secret: totpData.secret,
+      encoding: 'base32',
+      token: totpCode,
+      window: 2 // Allow 2 time steps (60 seconds) tolerance
+    });
+
+    if (!verified) {
+      return res.status(400).json({
+        error: 'Invalid TOTP code',
+        code: 'INVALID_TOTP'
+      });
+    }
+
+    // Mark as verified
+    totpData.verified = true;
+    global.totpSecrets.set(email, totpData);
+
+    res.json({
+      message: 'TOTP code verified successfully'
+    });
+
+  } catch (error) {
+    console.error('TOTP verification error:', error.message);
+    res.status(500).json({
+      error: 'Failed to verify TOTP code',
+      message: error.message
+    });
+  }
+});
+
+/**
+ * @route   POST /api/auth/reset-password-totp
+ * @desc    Reset password using verified TOTP
+ * @access  Public
+ */
+router.post('/reset-password-totp', async (req, res) => {
+  try {
+    const { email, totpCode, password } = req.body;
+
+    if (!email || !totpCode || !password) {
+      return res.status(400).json({
+        error: 'Email, TOTP code, and password are required',
+        code: 'MISSING_FIELDS'
+      });
+    }
+
+    if (!global.totpSecrets || !global.totpSecrets.has(email)) {
+      return res.status(400).json({
+        error: 'TOTP session expired or not found',
+        code: 'SESSION_EXPIRED'
+      });
+    }
+
+    const totpData = global.totpSecrets.get(email);
+    
+    if (Date.now() > totpData.expires) {
+      global.totpSecrets.delete(email);
+      return res.status(400).json({
+        error: 'TOTP session expired',
+        code: 'SESSION_EXPIRED'
+      });
+    }
+
+    const verified = speakeasy.totp.verify({
+      secret: totpData.secret,
+      encoding: 'base32',
+      token: totpCode,
+      window: 2
+    });
+
+    if (!verified) {
+      return res.status(400).json({
+        error: 'Invalid TOTP code',
+        code: 'INVALID_TOTP'
+      });
+    }
+
+    const user = await User.findUserByEmail(email);
+    if (!user) {
+      return res.status(404).json({
+        error: 'User not found',
+        code: 'USER_NOT_FOUND'
+      });
+    }
+
+      const salt = CryptoJS.lib.WordArray.random(32).toString();
+      const hashedPassword = CryptoJS.PBKDF2(password, salt, {
+        keySize: 256 / 32,
+        iterations: 10000
+      }).toString();
+      
+      const finalPasswordHash = `${hashedPassword}:${salt}`;
+      
+      await User.updatePassword(user.id, finalPasswordHash);
+
+    global.totpSecrets.delete(email);
+
+    res.json({
+      message: 'Password reset successfully'
+    });
+
+  } catch (error) {
+    console.error('TOTP password reset error:', error.message);
+    res.status(500).json({
+      error: 'Failed to reset password',
+      message: error.message
+    });
+  }
+});
+
+/**
+ * @route   POST /api/auth/setup-totp
+ * @desc    Generate TOTP secret for user setup
+ * @access  Private
+ */
+router.post('/setup-totp', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const userEmail = req.user.email;
+
+    // Check if user already has TOTP enabled
+    const user = await User.findUserById(userId);
+    if (user && user.totpEnabled) {
+      return res.status(400).json({
+        error: 'TOTP already enabled for this account',
+        code: 'TOTP_ALREADY_ENABLED'
+      });
+    }
+
+    // Generate TOTP secret
+    const secret = speakeasy.generateSecret({
+      name: `Scribe (${userEmail})`,
+      issuer: 'Scribe AI',
+      length: 32
+    });
+
+    // Generate QR code
+    const qrCodeUrl = await QRCode.toDataURL(secret.otpauth_url);
+
+    // Store the secret temporarily for verification
+    if (!global.totpSecrets) {
+      global.totpSecrets = new Map();
+    }
+    global.totpSecrets.set(`setup_${userId}`, {
+      secret: secret.base32,
+      expires: Date.now() + 10 * 60 * 1000 // 10 minutes
+    });
+
+    res.json({
+      message: 'TOTP secret generated',
+      qrCodeUrl,
+      secretKey: secret.base32
+    });
+
+  } catch (error) {
+    console.error('TOTP setup error:', error.message);
+    res.status(500).json({
+      error: 'Failed to generate TOTP secret',
+      message: error.message
+    });
+  }
+});
+
+/**
+ * @route   POST /api/auth/verify-totp-setup
+ * @desc    Verify TOTP code and enable TOTP for user
+ * @access  Private
+ */
+router.post('/verify-totp-setup', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { code } = req.body;
+
+    if (!code) {
+      return res.status(400).json({
+        error: 'Verification code is required',
+        code: 'MISSING_CODE'
+      });
+    }
+
+    // Get stored secret
+    const setupKey = `setup_${userId}`;
+    if (!global.totpSecrets || !global.totpSecrets.has(setupKey)) {
+      return res.status(400).json({
+        error: 'TOTP setup session expired',
+        code: 'SESSION_EXPIRED'
+      });
+    }
+
+    const totpData = global.totpSecrets.get(setupKey);
+    
+    // Check if session expired
+    if (Date.now() > totpData.expires) {
+      global.totpSecrets.delete(setupKey);
+      return res.status(400).json({
+        error: 'TOTP setup session expired',
+        code: 'SESSION_EXPIRED'
+      });
+    }
+
+    // Verify TOTP code
+    const verified = speakeasy.totp.verify({
+      secret: totpData.secret,
+      encoding: 'base32',
+      token: code,
+      window: 2
+    });
+
+    if (!verified) {
+      return res.status(400).json({
+        error: 'Invalid verification code',
+        code: 'INVALID_TOTP'
+      });
+    }
+
+    // Generate backup codes
+    const backupCodes = Array.from({ length: 10 }, () => 
+      Math.random().toString(36).substring(2, 8).toUpperCase()
+    );
+
+    // Enable TOTP for user
+    await User.enableTOTP(userId, totpData.secret, backupCodes);
+
+    // Clean up setup session
+    global.totpSecrets.delete(setupKey);
+
+    res.json({
+      message: 'TOTP enabled successfully',
+      backupCodes
+    });
+
+  } catch (error) {
+    console.error('TOTP verification error:', error.message);
+    res.status(500).json({
+      error: 'Failed to verify TOTP setup',
+      message: error.message
+    });
+  }
+});
 
 module.exports = router;

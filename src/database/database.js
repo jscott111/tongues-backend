@@ -123,6 +123,15 @@ const runMigrations = async () => {
         CREATE INDEX IF NOT EXISTS idx_sessions_last_activity ON sessions(last_activity);
         UPDATE sessions SET last_activity = created_at WHERE last_activity IS NULL;
       `
+    },
+    {
+      filename: '20250910000529_add_totp_to_users.sql',
+      sql: `
+        ALTER TABLE users 
+        ADD COLUMN totp_secret VARCHAR(255) NULL,
+        ADD COLUMN totp_enabled BOOLEAN DEFAULT FALSE,
+        ADD COLUMN totp_backup_codes TEXT[] NULL;
+      `
     }
   ];
 

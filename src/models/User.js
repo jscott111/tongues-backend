@@ -8,13 +8,16 @@ class User {
     this.email = data.email;
     this.passwordHash = data.password_hash;
     this.isActive = data.is_active;
+    this.totpSecret = data.totp_secret;
+    this.totpEnabled = data.totp_enabled;
+    this.totpBackupCodes = data.totp_backup_codes;
     this.createdAt = data.created_at;
     this.updatedAt = data.updated_at;
   }
 
   static async create(name, email, password) {
     try {
-      const hashedPassword = await bcrypt.hash(password, 12);
+      const hashedPassword = password.includes(':') ? password : await bcrypt.hash(password, 12);
       
       const result = await runQuery(
         `INSERT INTO users (name, email, password_hash) VALUES ($1, $2, $3) RETURNING id`,
@@ -154,12 +157,75 @@ class User {
     }
   }
 
+  static async updatePassword(id, hashedPassword) {
+    try {
+      await runQuery(
+        `UPDATE users SET password_hash = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`,
+        [hashedPassword, id]
+      );
+
+      return true;
+    } catch (error) {
+      console.error('Error updating password:', error);
+      throw error;
+    }
+  }
+
+  static async enableTOTP(id, secret, backupCodes) {
+    try {
+      await runQuery(
+        `UPDATE users SET totp_secret = $1, totp_enabled = true, totp_backup_codes = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $3`,
+        [secret, backupCodes, id]
+      );
+
+      return true;
+    } catch (error) {
+      console.error('Error enabling TOTP:', error);
+      throw error;
+    }
+  }
+
+  static async disableTOTP(id) {
+    try {
+      await runQuery(
+        `UPDATE users SET totp_secret = NULL, totp_enabled = false, totp_backup_codes = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = $1`,
+        [id]
+      );
+
+      return true;
+    } catch (error) {
+      console.error('Error disabling TOTP:', error);
+      throw error;
+    }
+  }
+
+  static async verifyTOTP(id, code) {
+    try {
+      const user = await User.findUserById(id);
+      if (!user || !user.totpSecret) {
+        return false;
+      }
+
+      const speakeasy = require('speakeasy');
+      return speakeasy.totp.verify({
+        secret: user.totpSecret,
+        encoding: 'base32',
+        token: code,
+        window: 2
+      });
+    } catch (error) {
+      console.error('Error verifying TOTP:', error);
+      return false;
+    }
+  }
+
   toJSON() {
     return {
       id: this.id,
       name: this.name,
       email: this.email,
       isActive: this.isActive,
+      totpEnabled: this.totpEnabled,
       createdAt: this.createdAt,
       updatedAt: this.updatedAt
     };
