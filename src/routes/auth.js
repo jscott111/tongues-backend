@@ -4,6 +4,8 @@ const speakeasy = require('speakeasy');
 const QRCode = require('qrcode');
 const CryptoJS = require('crypto-js');
 const User = require('../models/User');
+const PasswordResetToken = require('../models/PasswordResetToken');
+const emailService = require('../services/emailService');
 const { generateToken, generateRefreshToken, authenticateToken } = require('../middleware/auth');
 
 const router = express.Router();
@@ -240,7 +242,8 @@ router.get('/me', authenticateToken, (req, res) => {
       email: req.user.email,
       name: req.user.name,
       createdAt: req.user.createdAt,
-      updatedAt: req.user.updatedAt
+      updatedAt: req.user.updatedAt,
+      totpEnabled: req.user.totpEnabled
     }
   });
 });
@@ -574,6 +577,162 @@ router.post('/verify-totp-setup', authenticateToken, async (req, res) => {
     console.error('TOTP verification error:', error.message);
     res.status(500).json({
       error: 'Failed to verify TOTP setup',
+      message: error.message
+    });
+  }
+});
+
+/**
+ * @route   POST /api/auth/forgot-password-email
+ * @desc    Send password reset email
+ * @access  Public
+ */
+router.post('/forgot-password-email', async (req, res) => {
+  try {
+    const { email } = req.body;
+
+    if (!email) {
+      return res.status(400).json({
+        error: 'Email is required',
+        code: 'MISSING_EMAIL'
+      });
+    }
+
+    // Check if user exists
+    const user = await User.findUserByEmail(email);
+    if (!user || !user.isActive) {
+      // Don't reveal if user exists or not for security
+      return res.json({
+        message: 'If an account with that email exists, a password reset link has been sent.'
+      });
+    }
+
+    // Create password reset token
+    const resetToken = await PasswordResetToken.create(user.id, 60); // 1 hour expiry
+
+    // Determine subdomain from request origin
+    const origin = req.get('Origin') || req.get('Referer') || '';
+    const subdomain = origin.includes('speaker.localhost') ? 'speaker' : 
+                     origin.includes('listener.localhost') ? 'listener' : 'speaker';
+
+    // Send email
+    await emailService.sendPasswordResetEmail(user.email, resetToken.token, user.name, subdomain);
+
+    res.json({
+      message: 'If an account with that email exists, a password reset link has been sent.'
+    });
+
+  } catch (error) {
+    console.error('Email password reset error:', error.message);
+    res.status(500).json({
+      error: 'Failed to send password reset email',
+      message: error.message
+    });
+  }
+});
+
+/**
+ * @route   POST /api/auth/reset-password-email
+ * @desc    Reset password using email token
+ * @access  Public
+ */
+router.post('/reset-password-email', async (req, res) => {
+  try {
+    const { token, password } = req.body;
+
+    if (!token || !password) {
+      return res.status(400).json({
+        error: 'Token and password are required',
+        code: 'MISSING_FIELDS'
+      });
+    }
+
+    if (password.length < 6) {
+      return res.status(400).json({
+        error: 'Password must be at least 6 characters long',
+        code: 'INVALID_PASSWORD'
+      });
+    }
+
+    // Find valid token
+    const resetToken = await PasswordResetToken.findByToken(token);
+    if (!resetToken) {
+      return res.status(400).json({
+        error: 'Invalid or expired reset token',
+        code: 'INVALID_TOKEN'
+      });
+    }
+
+    // Get user
+    const user = await User.findUserById(resetToken.userId);
+    if (!user) {
+      return res.status(400).json({
+        error: 'User not found',
+        code: 'USER_NOT_FOUND'
+      });
+    }
+
+    // Generate new salt and hash the password
+    const salt = CryptoJS.lib.WordArray.random(32).toString();
+    const hashedPassword = CryptoJS.PBKDF2(password, salt, {
+      keySize: 256 / 32,
+      iterations: 10000
+    }).toString();
+    
+    const finalPasswordHash = `${hashedPassword}:${salt}`;
+
+    // Update password
+    await User.updatePassword(user.id, finalPasswordHash);
+
+    // Mark token as used
+    await PasswordResetToken.markAsUsed(token);
+
+    res.json({
+      message: 'Password reset successfully'
+    });
+
+  } catch (error) {
+    console.error('Email password reset error:', error.message);
+    res.status(500).json({
+      error: 'Failed to reset password',
+      message: error.message
+    });
+  }
+});
+
+/**
+ * @route   GET /api/auth/verify-reset-token
+ * @desc    Verify if reset token is valid
+ * @access  Public
+ */
+router.get('/verify-reset-token', async (req, res) => {
+  try {
+    const { token } = req.query;
+
+    if (!token) {
+      return res.status(400).json({
+        error: 'Token is required',
+        code: 'MISSING_TOKEN'
+      });
+    }
+
+    const resetToken = await PasswordResetToken.findByToken(token);
+    if (!resetToken) {
+      return res.status(400).json({
+        error: 'Invalid or expired reset token',
+        code: 'INVALID_TOKEN'
+      });
+    }
+
+    res.json({
+      valid: true,
+      message: 'Token is valid'
+    });
+
+  } catch (error) {
+    console.error('Token verification error:', error.message);
+    res.status(500).json({
+      error: 'Failed to verify token',
       message: error.message
     });
   }

@@ -25,5 +25,10 @@ module.exports = {
   CORS_ORIGIN: 'http://speaker.localhost:5173,http://listener.localhost:5173',
   
   // Logging
-  LOG_LEVEL: 'debug'
+  LOG_LEVEL: 'debug',
+
+  SMTP_USER: 'johnascott14@gmail.com',
+  SMTP_PASS: '3557321Joh--',
+  FROM_EMAIL: 'reset-password@scribe-ai.ca',
+  FRONTEND_URL: 'http://localhost:3000'
 }
