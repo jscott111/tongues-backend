@@ -1,0 +1,119 @@
+name: Backend Version Bump
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  version-check:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: |
+          npm install -g conventional-changelog-cli
+          npm install -g @commitlint/cli @commitlint/config-conventional
+
+      - name: Check backend commit messages
+        run: |
+          # Check if commits since last tag follow conventional format
+          LAST_TAG=$(git describe --tags --abbrev=0 --match="backend-v*" 2>/dev/null || echo "")
+          if [ -z "$LAST_TAG" ]; then
+            COMMITS=$(git log --oneline --grep="^(feat|fix|docs|style|refactor|test|chore|perf|ci|build|revert)(\(backend\))?:" -- scribe-backend/)
+          else
+            COMMITS=$(git log $LAST_TAG..HEAD --oneline --grep="^(feat|fix|docs|style|refactor|test|chore|perf|ci|build|revert)(\(backend\))?:" -- scribe-backend/)
+          fi
+          
+          echo "Checking backend commits:"
+          echo "$COMMITS"
+          
+          # Check for conventional commit format
+          echo "$COMMITS" | grep -E "^(feat|fix|docs|style|refactor|test|chore|perf|ci|build|revert)(\(backend\))?: .+" || {
+            echo "No conventional commits found for backend. Skipping version bump."
+            exit 0
+          }
+
+      - name: Determine version bump
+        id: version
+        run: |
+          LAST_TAG=$(git describe --tags --abbrev=0 --match="backend-v*" 2>/dev/null || echo "backend-v0.0.0")
+          echo "last_tag=$LAST_TAG" >> $GITHUB_OUTPUT
+          
+          # Get commits since last tag
+          COMMITS=$(git log $LAST_TAG..HEAD --oneline --grep="^(feat|fix|docs|style|refactor|test|chore|perf|ci|build|revert)(\(backend\))?:" -- scribe-backend/)
+          
+          # Determine bump type
+          if echo "$COMMITS" | grep -q "^[^:]*feat"; then
+            BUMP_TYPE="minor"
+          elif echo "$COMMITS" | grep -q "^[^:]*fix"; then
+            BUMP_TYPE="patch"
+          elif echo "$COMMITS" | grep -q "^[^:]*BREAKING CHANGE"; then
+            BUMP_TYPE="major"
+          else
+            echo "No version-worthy changes found for backend"
+            exit 0
+          fi
+          
+          echo "bump_type=$BUMP_TYPE" >> $GITHUB_OUTPUT
+          
+          # Calculate new version
+          CURRENT_VERSION=${LAST_TAG#backend-v}
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT_VERSION"
+          
+          case $BUMP_TYPE in
+            major)
+              NEW_VERSION="backend-v$((MAJOR + 1)).0.0"
+              ;;
+            minor)
+              NEW_VERSION="backend-v$MAJOR.$((MINOR + 1)).0"
+              ;;
+            patch)
+              NEW_VERSION="backend-v$MAJOR.$MINOR.$((PATCH + 1))"
+              ;;
+          esac
+          
+          echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
+          echo "New backend version: $NEW_VERSION"
+
+      - name: Create version bump PR
+        if: steps.version.outputs.new_version != ''
+        run: |
+          # Create new branch
+          git checkout -b "backend-version-bump-${{ steps.version.outputs.new_version }}"
+          
+          # Update package version
+          cd scribe-backend
+          npm version ${{ steps.version.outputs.new_version }} --no-git-tag-version
+          
+          # Generate changelog
+          conventional-changelog -p angular -i CHANGELOG.md -s -r 0
+          
+          # Commit changes
+          git add package.json CHANGELOG.md
+          git commit -m "chore(backend): bump version to ${{ steps.version.outputs.new_version }}"
+          
+          # Push branch
+          git push origin "backend-version-bump-${{ steps.version.outputs.new_version }}"
+          
+          # Create PR
+          gh pr create \
+            --title "chore(backend): bump version to ${{ steps.version.outputs.new_version }}" \
+            --body "Automated backend version bump based on conventional commits since ${{ steps.version.outputs.last_tag }}" \
+            --head "backend-version-bump-${{ steps.version.outputs.new_version }}" \
+            --base main
