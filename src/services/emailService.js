@@ -43,7 +43,7 @@ class EmailService {
       this.transporter = nodemailer.createTransport(smtpConfig);
       console.log('SMTP email service initialized');
     } else {
-      console.warn('No email credentials found. Set SENDGRID_API_KEY or SMTP_USER/SMTP_PASS. Email service will log to console.');
+      console.warn('No email credentials found. Set SENDGRID_API_KEY or SMTP_USER/SMTP_PASS. Email service will log to console.');                                                                                      
     }
   }
 
@@ -58,7 +58,16 @@ class EmailService {
   async sendPasswordResetEmail(to, resetToken, userName, subdomain = 'speaker') {
     try {
       const baseUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
-      const resetUrl = `${baseUrl.replace('localhost', `${subdomain}.localhost`)}/reset-password?token=${resetToken}`;
+      
+      // Handle production URLs properly
+      let resetUrl;
+      if (baseUrl.includes('localhost')) {
+        // Development: replace localhost with subdomain.localhost
+        resetUrl = `${baseUrl.replace('localhost', `${subdomain}.localhost`)}/reset-password?token=${resetToken}`;
+      } else {
+        // Production: use subdomain.scribe-ai.ca
+        resetUrl = `https://${subdomain}.scribe-ai.ca/reset-password?token=${resetToken}`;
+      }
       
       const msg = {
         to: to,
@@ -74,9 +83,9 @@ class EmailService {
             <style>
               body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
               .container { max-width: 600px; margin: 0 auto; padding: 20px; }
-              .header { background: #f8f9fa; padding: 20px; text-align: center; border-radius: 8px 8px 0 0; }
+              .header { background: #f8f9fa; padding: 20px; text-align: center; border-radius: 8px 8px 0 0; }                                                                                                           
               .content { background: #ffffff; padding: 30px; border: 1px solid #e9ecef; }
-              .footer { background: #f8f9fa; padding: 20px; text-align: center; border-radius: 0 0 8px 8px; font-size: 14px; color: #6c757d; }
+              .footer { background: #f8f9fa; padding: 20px; text-align: center; border-radius: 0 0 8px 8px; font-size: 14px; color: #6c757d; }                                                                          
               .button { 
                 display: inline-block; 
                 background: #007bff; 
@@ -123,7 +132,7 @@ class EmailService {
                 </div>
               </div>
               <div class="footer">
-                <p>This email was sent from Scribe AI. If you have any questions, please contact support.</p>
+                <p>This email was sent from Scribe AI. If you have any questions, please contact support.</p>                                                                                                           
                 <p>&copy; ${new Date().getFullYear()} Scribe AI. All rights reserved.</p>
               </div>
             </div>
@@ -198,9 +207,9 @@ class EmailService {
             <style>
               body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
               .container { max-width: 600px; margin: 0 auto; padding: 20px; }
-              .header { background: #f8f9fa; padding: 20px; text-align: center; border-radius: 8px 8px 0 0; }
+              .header { background: #f8f9fa; padding: 20px; text-align: center; border-radius: 8px 8px 0 0; }                                                                                                           
               .content { background: #ffffff; padding: 30px; border: 1px solid #e9ecef; }
-              .footer { background: #f8f9fa; padding: 20px; text-align: center; border-radius: 0 0 8px 8px; font-size: 14px; color: #6c757d; }
+              .footer { background: #f8f9fa; padding: 20px; text-align: center; border-radius: 0 0 8px 8px; font-size: 14px; color: #6c757d; }                                                                          
             </style>
           </head>
           <body>

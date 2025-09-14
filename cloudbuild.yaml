@@ -7,11 +7,11 @@ steps:
 
   - id: 'build-image'
     name: 'gcr.io/cloud-builders/docker'
-    args: ['build', '-t', 'gcr.io/$PROJECT_ID/scribe-backend:${_VERSION:-$COMMIT_SHA}', '.']
+    args: ['build', '-t', 'gcr.io/$PROJECT_ID/scribe-backend:$TAG_NAME', '.']
   
   - id: 'push-image'
     name: 'gcr.io/cloud-builders/docker'
-    args: ['push', 'gcr.io/$PROJECT_ID/scribe-backend:${_VERSION:-$COMMIT_SHA}']
+    args: ['push', 'gcr.io/$PROJECT_ID/scribe-backend:$TAG_NAME']
 
   - id: 'deploy-to-cloud-run'
     name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
@@ -21,7 +21,7 @@ steps:
       - 'deploy'
       - 'scribe-backend'
       - '--image'
-      - 'gcr.io/$PROJECT_ID/scribe-backend:${_VERSION:-$COMMIT_SHA}'
+      - 'gcr.io/$PROJECT_ID/scribe-backend:$TAG_NAME'
       - '--region'
       - 'northamerica-northeast1'
       - '--platform'
@@ -42,11 +42,12 @@ steps:
 
 # Store images in Google Container Registry
 images:
-  - 'gcr.io/$PROJECT_ID/scribe-backend:${_VERSION:-$COMMIT_SHA}'
+  - 'gcr.io/$PROJECT_ID/scribe-backend:$TAG_NAME'
 
 # Substitution variables
 substitutions:
   _VERSION: ''
+  TAG_NAME: '$COMMIT_SHA'
 
 # Build options
 options:
