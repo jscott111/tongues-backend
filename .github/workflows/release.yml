@@ -2,13 +2,17 @@ name: Backend Release
 
 on:
   push:
-    tags:
-      - 'v*'
+    branches:
+      - master
+    paths:
+      - 'src/**'
+      - 'package.json'
+      - 'cloudbuild.yaml'
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version to release (e.g., v1.0.0)'
-        required: true
+        description: 'Version to release (e.g., v1.0.0) - leave empty for auto-bump'
+        required: false
         type: string
 
 jobs:
@@ -38,10 +42,54 @@ jobs:
       - name: Get version
         id: version
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ github.event.inputs.version }}" ]; then
+            # Manual version provided
             echo "version=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
           else
-            echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+            # Auto-bump version based on commits
+            npm install -g conventional-changelog-cli
+            
+            # Get last tag
+            LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+            echo "last_tag=$LAST_TAG" >> $GITHUB_OUTPUT
+            
+            # Get commits since last tag
+            COMMITS=$(git log $LAST_TAG..HEAD --oneline --grep="^(feat|fix|docs|style|refactor|test|chore|perf|ci|build|revert):" || echo "")
+            
+            if [ -z "$COMMITS" ]; then
+              echo "No conventional commits found. Skipping version bump."
+              exit 0
+            fi
+            
+            # Determine bump type
+            if echo "$COMMITS" | grep -q "^[^:]*feat"; then
+              BUMP_TYPE="minor"
+            elif echo "$COMMITS" | grep -q "^[^:]*fix"; then
+              BUMP_TYPE="patch"
+            elif echo "$COMMITS" | grep -q "^[^:]*BREAKING CHANGE"; then
+              BUMP_TYPE="major"
+            else
+              BUMP_TYPE="patch"
+            fi
+            
+            # Calculate new version
+            CURRENT_VERSION=${LAST_TAG#v}
+            IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT_VERSION"
+            
+            case $BUMP_TYPE in
+              major)
+                NEW_VERSION="v$((MAJOR + 1)).0.0"
+                ;;
+              minor)
+                NEW_VERSION="v$MAJOR.$((MINOR + 1)).0"
+                ;;
+              patch)
+                NEW_VERSION="v$MAJOR.$MINOR.$((PATCH + 1))"
+                ;;
+            esac
+            
+            echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
+            echo "New version: $NEW_VERSION"
           fi
 
       - name: Update package version
@@ -93,6 +141,7 @@ jobs:
             This release will automatically trigger deployment to production via Google Cloud Build.
           draft: false
           prerelease: false
+        continue-on-error: true
 
       - name: Deployment
         run: |
