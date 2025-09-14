@@ -3,6 +3,7 @@ const { body, validationResult } = require('express-validator');
 const speakeasy = require('speakeasy');
 const QRCode = require('qrcode');
 const CryptoJS = require('crypto-js');
+const bcrypt = require('bcrypt');
 const User = require('../models/User');
 const PasswordResetToken = require('../models/PasswordResetToken');
 const emailService = require('../services/emailService');
