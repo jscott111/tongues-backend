@@ -14,8 +14,8 @@ module.exports = {
   
   // JWT Configuration
   JWT_SECRET: 'dev-super-secret-jwt-key-change-this-in-production',
-  JWT_ACCESS_EXPIRES_IN: '24h',
-  JWT_REFRESH_EXPIRES_IN: '7d',
+  JWT_ACCESS_EXPIRES_IN: '30d',
+  JWT_REFRESH_EXPIRES_IN: '60d',
   
   // Azure Translator
   AZURE_TRANSLATOR_KEY: process.env.AZURE_TRANSLATOR_KEY || 'your-azure-translator-key-here',

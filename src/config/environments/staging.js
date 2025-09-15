@@ -14,8 +14,8 @@ module.exports = {
   
   // JWT Configuration
   JWT_SECRET: process.env.JWT_SECRET || 'staging-super-secret-jwt-key-change-this',
-  JWT_ACCESS_EXPIRES_IN: '12h',
-  JWT_REFRESH_EXPIRES_IN: '3d',
+  JWT_ACCESS_EXPIRES_IN: '30d',
+  JWT_REFRESH_EXPIRES_IN: '60d',
   
   // Azure Translator
   AZURE_TRANSLATOR_KEY: process.env.AZURE_TRANSLATOR_KEY,
