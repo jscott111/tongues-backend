@@ -142,6 +142,22 @@ class Session {
       return [];
     }
   }
+
+  static async cleanupExpired() {
+    try {
+      const result = await runQuery(
+        `UPDATE sessions SET is_active = false 
+         WHERE is_active = true 
+         AND last_activity < NOW() - INTERVAL '24 hours'`,
+        []
+      );
+      
+      return result.rowCount || 0;
+    } catch (error) {
+      console.error('Error cleaning up expired sessions:', error);
+      return 0;
+    }
+  }
 }
 
 module.exports = Session;
